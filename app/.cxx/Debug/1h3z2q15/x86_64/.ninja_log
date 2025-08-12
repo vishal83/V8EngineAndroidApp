@@ -1,0 +1,4 @@
+# ninja log v5
+0	671	1754981624047827775	CMakeFiles/v8integration.dir/v8integration.cpp.o	cdc32e1ba6c5b901
+1	779	1754981624154160317	CMakeFiles/v8integration.dir/bytetransfer.cpp.o	1f6d08c34869adb6
+779	854	1754981624233166093	/Users/visgupta/devel/git/V8EngineAndroidApp/app/build/intermediates/cxx/Debug/1h3z2q15/obj/x86_64/libv8integration.so	c4ca11618bd40d03

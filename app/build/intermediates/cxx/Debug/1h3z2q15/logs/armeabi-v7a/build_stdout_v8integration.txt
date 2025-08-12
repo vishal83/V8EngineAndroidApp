@@ -1,0 +1,2 @@
+ninja: Entering directory `/Users/visgupta/devel/git/V8EngineAndroidApp/app/.cxx/Debug/1h3z2q15/armeabi-v7a'
+ninja: no work to do.
