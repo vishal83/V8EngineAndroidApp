@@ -7,7 +7,7 @@ import android.util.Log
  */
 object ErrorHandler {
     
-    private const val TAG = "ErrorHandler"
+    const val TAG = "ErrorHandler"
     
     /**
      * Handle initialization errors with standardized logging

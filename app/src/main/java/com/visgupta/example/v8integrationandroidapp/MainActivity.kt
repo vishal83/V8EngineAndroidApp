@@ -389,17 +389,38 @@ fun IntegrationTestTab(v8Bridge: V8Bridge, byteTransferBridge: ByteTransferBridg
                     onClick = {
                         integrationResults = "Running integration tests...\n"
                         
+                        // First ensure both systems are initialized
+                        if (!v8Bridge.isV8Initialized()) {
+                            integrationResults += "❌ V8 Engine not initialized. Please initialize V8 first.\n"
+                            return@Button
+                        }
+                        if (!byteTransferBridge.isInitialized()) {
+                            integrationResults += "❌ ByteTransfer System not initialized. Please initialize ByteTransfer first.\n"
+                            return@Button
+                        }
+                        
+                        // Create a named buffer for V8 integration tests
+                        val bufferName = "v8_test"
+                        val bufferSize = 1024
+                        val createBufferSuccess = byteTransferBridge.createBuffer(bufferName, bufferSize)
+                        integrationResults += "Create Named Buffer '$bufferName': ${if (createBufferSuccess) "✅ SUCCESS" else "❌ FAILED"}\n"
+                        
+                        if (!createBufferSuccess) {
+                            integrationResults += "❌ Cannot proceed without named buffer\n"
+                            return@Button
+                        }
+                        
                         val testData = "V8 Integration Test Data"
-                        val writeSuccess = v8Bridge.testByteTransfer(testData.toByteArray())
+                        val writeSuccess = v8Bridge.testByteTransfer(testData.toByteArray(), bufferName)
                         integrationResults += "V8 → ByteTransfer Write: ${if (writeSuccess) "✅ SUCCESS" else "❌ FAILED"}\n"
                         
-                        val readBytes = v8Bridge.readBytesFromTransfer(testData.length)
+                        val readBytes = v8Bridge.readBytesFromTransfer(testData.length, 0, bufferName)
                         val readSuccess = readBytes != null
                         val readData = readBytes?.toString(Charsets.UTF_8) ?: "FAILED"
                         integrationResults += "ByteTransfer → V8 Read: ${if (readSuccess) "✅ SUCCESS" else "❌ FAILED"}\n"
                         integrationResults += "Data Match: ${if (readData == testData) "✅ MATCH" else "❌ MISMATCH"}\n"
                         
-                        val bufferInfo = v8Bridge.getByteTransferInfo()
+                        val bufferInfo = v8Bridge.getByteTransferInfo(bufferName)
                         integrationResults += "Buffer Info: $bufferInfo\n"
                     },
                     modifier = Modifier.fillMaxWidth()

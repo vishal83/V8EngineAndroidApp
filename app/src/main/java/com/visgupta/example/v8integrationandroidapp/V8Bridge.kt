@@ -147,21 +147,21 @@ class V8Bridge {
         return results
     }
     
-    // ByteTransfer integration methods
-    private external fun testByteTransfer(data: ByteArray, bufferName: String?): Boolean
-    private external fun readBytesFromTransfer(length: Int, offset: Int, bufferName: String?): ByteArray?
-    private external fun getByteTransferInfo(bufferName: String?): String
-    private external fun transferBytesToBuffer(data: ByteArray, bufferName: String?): Boolean
-    private external fun readBytesFromBuffer(length: Int, offset: Int, bufferName: String?): ByteArray?
-    private external fun getBufferInfoFromV8(bufferName: String?): String
-    private external fun runV8ByteTransferTests(): String
+    // ByteTransfer integration methods (native)
+    private external fun nativeTestByteTransfer(data: ByteArray, bufferName: String?): Boolean
+    private external fun nativeReadBytesFromTransfer(length: Int, offset: Int, bufferName: String?): ByteArray?
+    private external fun nativeGetByteTransferInfo(bufferName: String?): String
+    private external fun nativeTransferBytesToBuffer(data: ByteArray, bufferName: String?): Boolean
+    private external fun nativeReadBytesFromBuffer(length: Int, offset: Int, bufferName: String?): ByteArray?
+    private external fun nativeGetBufferInfoFromV8(bufferName: String?): String
+    private external fun nativeRunV8ByteTransferTests(): String
     
     /**
      * Test byte transfer from V8 to ByteTransfer system
      */
     fun testByteTransfer(data: ByteArray, bufferName: String? = null): Boolean {
         Log.i(TAG, "Testing byte transfer with ${data.size} bytes to buffer '${bufferName ?: "shared"}'")
-        val result = testByteTransfer(data, bufferName)
+        val result = nativeTestByteTransfer(data, bufferName)
         Log.i(TAG, "Byte transfer test: ${if (result) "SUCCESS" else "FAILED"}")
         return result
     }
@@ -171,7 +171,7 @@ class V8Bridge {
      */
     fun readBytesFromTransfer(length: Int, offset: Int = 0, bufferName: String? = null): ByteArray? {
         Log.i(TAG, "Reading $length bytes from ByteTransfer buffer '${bufferName ?: "shared"}' at offset $offset")
-        val result = readBytesFromTransfer(length, offset, bufferName)
+        val result = nativeReadBytesFromTransfer(length, offset, bufferName)
         Log.i(TAG, "Read from ByteTransfer: ${if (result != null) "SUCCESS (${result.size} bytes)" else "FAILED"}")
         return result
     }
@@ -181,7 +181,7 @@ class V8Bridge {
      */
     fun getByteTransferInfo(bufferName: String? = null): String {
         Log.i(TAG, "Getting ByteTransfer info for buffer '${bufferName ?: "shared"}'")
-        val result = getByteTransferInfo(bufferName)
+        val result = nativeGetByteTransferInfo(bufferName)
         Log.i(TAG, "ByteTransfer info: $result")
         return result
     }
@@ -191,7 +191,7 @@ class V8Bridge {
      */
     fun transferBytesToBuffer(data: ByteArray, bufferName: String? = null): Boolean {
         Log.i(TAG, "Transferring ${data.size} bytes to buffer '${bufferName ?: "shared"}'")
-        val result = transferBytesToBuffer(data, bufferName)
+        val result = nativeTransferBytesToBuffer(data, bufferName)
         Log.i(TAG, "Transfer to buffer: ${if (result) "SUCCESS" else "FAILED"}")
         return result
     }
@@ -201,7 +201,7 @@ class V8Bridge {
      */
     fun readBytesFromBuffer(length: Int, offset: Int = 0, bufferName: String? = null): ByteArray? {
         Log.i(TAG, "Reading $length bytes from buffer '${bufferName ?: "shared"}' at offset $offset")
-        val result = readBytesFromBuffer(length, offset, bufferName)
+        val result = nativeReadBytesFromBuffer(length, offset, bufferName)
         Log.i(TAG, "Read from buffer: ${if (result != null) "SUCCESS (${result.size} bytes)" else "FAILED"}")
         return result
     }
@@ -211,7 +211,7 @@ class V8Bridge {
      */
     fun getBufferInfoFromV8(bufferName: String? = null): String {
         Log.i(TAG, "Getting buffer info from V8 for '${bufferName ?: "shared"}'")
-        val result = getBufferInfoFromV8(bufferName)
+        val result = nativeGetBufferInfoFromV8(bufferName)
         Log.i(TAG, "V8 buffer info: $result")
         return result
     }
@@ -221,7 +221,7 @@ class V8Bridge {
      */
     fun runV8ByteTransferTests(): String {
         Log.i(TAG, "Running V8 ↔ ByteTransfer integration tests")
-        val result = runV8ByteTransferTests()
+        val result = nativeRunV8ByteTransferTests()
         Log.i(TAG, "V8 ByteTransfer tests result: $result")
         return result
     }
