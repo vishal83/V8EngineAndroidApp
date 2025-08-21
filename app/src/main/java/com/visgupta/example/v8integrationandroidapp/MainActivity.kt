@@ -29,6 +29,7 @@ class MainActivity : ComponentActivity() {
     
     private lateinit var v8Bridge: V8Bridge
     private lateinit var byteTransferBridge: ByteTransferBridge
+    private lateinit var quickJSBridge: QuickJSBridge
     external fun stringFromJNI(): String
     
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -37,6 +38,7 @@ class MainActivity : ComponentActivity() {
         
         v8Bridge = V8Bridge()
         byteTransferBridge = ByteTransferBridge()
+        quickJSBridge = QuickJSBridge()
         
         setContent {
             MyApplicationTheme {
@@ -44,6 +46,7 @@ class MainActivity : ComponentActivity() {
                     V8IntegrationTestScreen(
                         v8Bridge = v8Bridge,
                         byteTransferBridge = byteTransferBridge,
+                        quickJSBridge = quickJSBridge,
                         modifier = Modifier.padding(innerPadding)
                     )
                 }
@@ -59,6 +62,9 @@ class MainActivity : ComponentActivity() {
         if (::byteTransferBridge.isInitialized) {
             byteTransferBridge.cleanup()
         }
+        if (::quickJSBridge.isInitialized) {
+            quickJSBridge.cleanup()
+        }
     }
 }
 
@@ -67,10 +73,11 @@ class MainActivity : ComponentActivity() {
 fun V8IntegrationTestScreen(
     v8Bridge: V8Bridge,
     byteTransferBridge: ByteTransferBridge,
+    quickJSBridge: QuickJSBridge,
     modifier: Modifier = Modifier
 ) {
     var selectedTab by remember { mutableStateOf(0) }
-    val tabs = listOf("V8 Engine", "ByteTransfer", "Integration", "Status")
+    val tabs = listOf("V8 Engine", "ByteTransfer", "Integration", "Status", "QuickJS")
     
     Column(modifier = modifier.fillMaxSize()) {
         TabRow(selectedTabIndex = selectedTab) {
@@ -88,6 +95,7 @@ fun V8IntegrationTestScreen(
             1 -> ByteTransferTestTab(byteTransferBridge)
             2 -> IntegrationTestTab(v8Bridge, byteTransferBridge)
             3 -> SystemStatusTab(v8Bridge, byteTransferBridge)
+            4 -> QuickJSTestTab(quickJSBridge)
         }
     }
 }
@@ -100,7 +108,9 @@ fun V8TestTab(v8Bridge: V8Bridge) {
     var customResult by remember { mutableStateOf("") }
     
     LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(16.dp),
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         item {
@@ -208,7 +218,9 @@ fun ByteTransferTestTab(byteTransferBridge: ByteTransferBridge) {
     var customResult by remember { mutableStateOf("") }
     
     LazyColumn(
-        modifier = Modifier.fillMaxSize().padding(16.dp),
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp)
     ) {
         item {
@@ -628,15 +640,213 @@ fun FeatureRow(feature: String, description: String) {
     }
 }
 
+@Composable
+fun QuickJSTestTab(quickJSBridge: QuickJSBridge) {
+    var isQuickJSInitialized by remember { mutableStateOf(false) }
+    var testResults by remember { mutableStateOf<Map<String, String>>(emptyMap()) }
+    var customScript by remember { mutableStateOf("const sum = (a, b) => a + b; sum(15, 27)") }
+    var customResult by remember { mutableStateOf("") }
+    var engineInfo by remember { mutableStateOf("") }
+
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        item {
+            Text(
+                text = "QuickJS JavaScript Engine",
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Bold
+            )
+        }
+
+        item {
+            Card {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text(
+                        text = "QuickJS Engine Status",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = if (isQuickJSInitialized) "✅ Initialized" else "❌ Not Initialized",
+                            color = if (isQuickJSInitialized) Color(0xFF4CAF50) else Color(
+                                0xFFF44336
+                            ),
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+
+                    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        Button(
+                            onClick = {
+                                isQuickJSInitialized = quickJSBridge.initialize()
+                                engineInfo = quickJSBridge.getEngineInfo()
+                            },
+                            enabled = !isQuickJSInitialized,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("Initialize")
+                        }
+
+                        Button(
+                            onClick = {
+                                quickJSBridge.cleanup()
+                                isQuickJSInitialized = false
+                                testResults = emptyMap()
+                                customResult = ""
+                                engineInfo = ""
+                            },
+                            enabled = isQuickJSInitialized,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Text("Cleanup")
+                        }
+                    }
+
+                    if (engineInfo.isNotEmpty()) {
+                        Card(
+                            colors = CardDefaults.cardColors(
+                                containerColor = MaterialTheme.colorScheme.secondaryContainer
+                            )
+                        ) {
+                            Column(modifier = Modifier.padding(12.dp)) {
+                                Text(
+                                    text = "Engine Information",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold
+                                )
+                                Text(text = engineInfo)
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        item {
+            Card {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text(
+                        text = "Custom JavaScript Execution",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+
+                    OutlinedTextField(
+                        value = customScript,
+                        onValueChange = { customScript = it },
+                        label = { Text("JavaScript Code (ES2023 supported)") },
+                        modifier = Modifier.fillMaxWidth(),
+                        minLines = 3
+                    )
+
+                    Button(
+                        onClick = {
+                            customResult = if (isQuickJSInitialized) {
+                                quickJSBridge.runJavaScript(customScript)
+                            } else {
+                                "❌ Please initialize QuickJS first"
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Execute JavaScript")
+                    }
+
+                    if (customResult.isNotEmpty()) {
+                        ResultCard("Execution Result", customResult)
+                    }
+                }
+            }
+        }
+
+        item {
+            Card {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text(
+                        text = "QuickJS Test Suite",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+
+                    Button(
+                        onClick = {
+                            testResults = if (isQuickJSInitialized) {
+                                quickJSBridge.runTestSuite()
+                            } else {
+                                mapOf("error" to "❌ Please initialize QuickJS first")
+                            }
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Run Complete Test Suite")
+                    }
+
+                    Button(
+                        onClick = {
+                            val quickJSResults = if (isQuickJSInitialized) {
+                                quickJSBridge.runQuickJSSpecificTests()
+                            } else {
+                                "❌ Please initialize QuickJS first"
+                            }
+                            testResults = mapOf("quickjs_specific" to quickJSResults)
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Run QuickJS Specific Tests")
+                    }
+
+                    Button(
+                        onClick = {
+                            val memoryStats = if (isQuickJSInitialized) {
+                                quickJSBridge.getMemoryStats()
+                            } else {
+                                "❌ Please initialize QuickJS first"
+                            }
+                            testResults = mapOf("memory_stats" to memoryStats)
+                        },
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text("Get Memory Statistics")
+                    }
+                }
+            }
+        }
+
+        items(testResults.toList()) { (testName, result) ->
+            TestResultCard(testName, result)
+        }
+    }
+}
+
 @Preview(showBackground = true)
 @Composable
 fun V8IntegrationTestScreenPreview() {
     MyApplicationTheme {
         val mockV8Bridge = V8Bridge()
         val mockByteTransferBridge = ByteTransferBridge()
+        val mockQuickJSBridge = QuickJSBridge()
         V8IntegrationTestScreen(
             v8Bridge = mockV8Bridge,
-            byteTransferBridge = mockByteTransferBridge
+            byteTransferBridge = mockByteTransferBridge,
+            quickJSBridge = mockQuickJSBridge
         )
     }
 }
