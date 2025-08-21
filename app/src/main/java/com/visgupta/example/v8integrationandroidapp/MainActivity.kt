@@ -986,6 +986,11 @@ fun RemoteJSTestTab(quickJSBridge: QuickJSBridge) {
                                             remoteUrl = quickJSBridge.buildLocalServerUrl(localServerIp, localServerPort, "test_cache_system.js")
                                             selectedPopularUrl = name
                                             showLocalServerConfig = true
+                                        } else if (name == "Test Bytecode Compilation") {
+                                            // Handle bytecode compilation test
+                                            remoteUrl = "BYTECODE_TEST"
+                                            selectedPopularUrl = name
+                                            showLocalServerConfig = false
                                         } else {
                                             remoteUrl = url
                                             selectedPopularUrl = name
@@ -1156,22 +1161,43 @@ fun RemoteJSTestTab(quickJSBridge: QuickJSBridge) {
                                     isExecuting = true
                                     progressMessage = ""
                                     
-                                    quickJSBridge.executeRemoteJavaScript(remoteUrl, object : QuickJSBridge.RemoteExecutionCallback {
-                                        override fun onProgress(message: String) {
-                                            progressMessage = message
-                                        }
+                                    if (remoteUrl == "BYTECODE_TEST") {
+                                        // Handle bytecode compilation test
+                                        quickJSBridge.runBytecodeTest(object : QuickJSBridge.RemoteExecutionCallback {
+                                            override fun onProgress(message: String) {
+                                                progressMessage = message
+                                            }
 
-                                        override fun onSuccess(result: QuickJSBridge.RemoteExecutionResult) {
-                                            isExecuting = false
-                                            progressMessage = "✅ Execution completed successfully!"
-                                            executionResults = quickJSBridge.getExecutionHistory()
-                                        }
+                                            override fun onSuccess(result: QuickJSBridge.RemoteExecutionResult) {
+                                                isExecuting = false
+                                                progressMessage = "✅ Bytecode test completed successfully!"
+                                                executionResults = quickJSBridge.getExecutionHistory()
+                                            }
 
-                                        override fun onError(url: String, error: String) {
-                                            isExecuting = false
-                                            progressMessage = "❌ $error"
-                                        }
-                                    })
+                                            override fun onError(url: String, error: String) {
+                                                isExecuting = false
+                                                progressMessage = "❌ $error"
+                                            }
+                                        })
+                                    } else {
+                                        // Handle normal remote JavaScript execution
+                                        quickJSBridge.executeRemoteJavaScript(remoteUrl, object : QuickJSBridge.RemoteExecutionCallback {
+                                            override fun onProgress(message: String) {
+                                                progressMessage = message
+                                            }
+
+                                            override fun onSuccess(result: QuickJSBridge.RemoteExecutionResult) {
+                                                isExecuting = false
+                                                progressMessage = "✅ Execution completed successfully!"
+                                                executionResults = quickJSBridge.getExecutionHistory()
+                                            }
+
+                                            override fun onError(url: String, error: String) {
+                                                isExecuting = false
+                                                progressMessage = "❌ $error"
+                                            }
+                                        })
+                                    }
                                 },
                                 enabled = !isExecuting && remoteUrl.isNotBlank(),
                                 modifier = Modifier.weight(1f)

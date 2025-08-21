@@ -377,18 +377,36 @@ public:
         
         LOGI("Compiling JavaScript to bytecode");
         
+        // Try to compile the script as-is first, then try wrapping if it fails
+        std::string scriptToCompile = script;
+        LOGI("Attempting to compile script directly (length: %zu)", script.length());
+        
         // Compile to bytecode
-        JSValue compiled = JS_Eval(context, script.c_str(), script.length(), 
+        JSValue compiled = JS_Eval(context, scriptToCompile.c_str(), scriptToCompile.length(), 
             "<compile>", JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_COMPILE_ONLY);
         
         if (JS_IsException(compiled)) {
-            JSValue exception = JS_GetException(context);
-            const char *exceptionStr = JS_ToCString(context, exception);
-            LOGE("Compilation error: %s", exceptionStr ? exceptionStr : "Unknown error");
-            if (exceptionStr) JS_FreeCString(context, exceptionStr);
-            JS_FreeValue(context, exception);
+            // First attempt failed, try wrapping in function
             JS_FreeValue(context, compiled);
-            return {};
+            LOGI("Direct compilation failed, trying with function wrapper");
+            
+            scriptToCompile = "(function() {\n" + script + "\n})";
+            compiled = JS_Eval(context, scriptToCompile.c_str(), scriptToCompile.length(), 
+                "<compile-wrapped>", JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_COMPILE_ONLY);
+            
+            if (JS_IsException(compiled)) {
+                JSValue exception = JS_GetException(context);
+                const char *exceptionStr = JS_ToCString(context, exception);
+                LOGE("Compilation error (both attempts): %s", exceptionStr ? exceptionStr : "Unknown error");
+                if (exceptionStr) JS_FreeCString(context, exceptionStr);
+                JS_FreeValue(context, exception);
+                JS_FreeValue(context, compiled);
+                return {};
+            } else {
+                LOGI("Compilation successful with function wrapper");
+            }
+        } else {
+            LOGI("Compilation successful without wrapper");
         }
         
         size_t bytecode_size;
@@ -440,8 +458,27 @@ public:
             return error;
         }
         
-        // Execute the bytecode
-        JSValue result = JS_EvalFunction(context, obj);
+        // Execute the bytecode (it's a function, so we need to call it)
+        JSValue func = JS_EvalFunction(context, obj);
+        if (JS_IsException(func)) {
+            JSValue exception = JS_GetException(context);
+            const char *exceptionStr = JS_ToCString(context, exception);
+            std::string error = "Bytecode Function Error: ";
+            if (exceptionStr) {
+                error += exceptionStr;
+                JS_FreeCString(context, exceptionStr);
+            } else {
+                error += "Failed to evaluate bytecode function";
+            }
+            JS_FreeValue(context, exception);
+            JS_FreeValue(context, func);
+            LOGE("Bytecode function evaluation error: %s", error.c_str());
+            return error;
+        }
+        
+        // Call the function to get the actual result
+        JSValue result = JS_Call(context, func, JS_UNDEFINED, 0, nullptr);
+        JS_FreeValue(context, func);
         
         if (JS_IsException(result)) {
             JSValue exception = JS_GetException(context);
@@ -758,6 +795,80 @@ Java_com_visgupta_example_v8integrationandroidapp_QuickJSBridge_nativeHttpReques
 JNIEXPORT jboolean JNICALL
 Java_com_visgupta_example_v8integrationandroidapp_QuickJSBridge_resetContext(JNIEnv *env, jobject thiz) {
     return g_quickjsEngine ? g_quickjsEngine->resetContext() : false;
+}
+
+// Compile JavaScript to bytecode JNI function
+JNIEXPORT jbyteArray JNICALL
+Java_com_visgupta_example_v8integrationandroidapp_QuickJSBridge_compileScript(JNIEnv *env, jobject thiz, jstring script) {
+    if (!g_quickjsEngine || !g_quickjsEngine->isInitialized()) {
+        LOGE("QuickJS not initialized for compilation");
+        return nullptr;
+    }
+    
+    const char *scriptStr = env->GetStringUTFChars(script, nullptr);
+    if (!scriptStr) {
+        LOGE("Failed to get script string");
+        return nullptr;
+    }
+    
+    std::vector<uint8_t> bytecode = g_quickjsEngine->compileScript(std::string(scriptStr));
+    env->ReleaseStringUTFChars(script, scriptStr);
+    
+    if (bytecode.empty()) {
+        LOGE("Failed to compile script to bytecode");
+        return nullptr;
+    }
+    
+    // Create Java byte array
+    jbyteArray result = env->NewByteArray(bytecode.size());
+    if (result) {
+        env->SetByteArrayRegion(result, 0, bytecode.size(), reinterpret_cast<const jbyte*>(bytecode.data()));
+        LOGI("Successfully compiled script to %zu bytes of bytecode", bytecode.size());
+    }
+    
+    return result;
+}
+
+// Execute bytecode JNI function
+JNIEXPORT jstring JNICALL
+Java_com_visgupta_example_v8integrationandroidapp_QuickJSBridge_executeBytecode(JNIEnv *env, jobject thiz, jbyteArray bytecode) {
+    if (!g_quickjsEngine || !g_quickjsEngine->isInitialized()) {
+        LOGE("QuickJS not initialized for bytecode execution");
+        return env->NewStringUTF("Error: QuickJS not initialized");
+    }
+    
+    if (!bytecode) {
+        LOGE("Null bytecode provided");
+        return env->NewStringUTF("Error: Null bytecode");
+    }
+    
+    jsize bytecodeLength = env->GetArrayLength(bytecode);
+    if (bytecodeLength <= 0) {
+        LOGE("Empty bytecode provided");
+        return env->NewStringUTF("Error: Empty bytecode");
+    }
+    
+    // Get bytecode data
+    jbyte* bytecodeData = env->GetByteArrayElements(bytecode, nullptr);
+    if (!bytecodeData) {
+        LOGE("Failed to get bytecode data");
+        return env->NewStringUTF("Error: Failed to get bytecode data");
+    }
+    
+    // Convert to vector
+    std::vector<uint8_t> bytecodeVector(
+        reinterpret_cast<uint8_t*>(bytecodeData),
+        reinterpret_cast<uint8_t*>(bytecodeData) + bytecodeLength
+    );
+    
+    // Release the array elements
+    env->ReleaseByteArrayElements(bytecode, bytecodeData, JNI_ABORT);
+    
+    // Execute bytecode
+    std::string result = g_quickjsEngine->executeBytecode(bytecodeVector);
+    
+    LOGI("Bytecode execution completed, result length: %zu", result.length());
+    return env->NewStringUTF(result.c_str());
 }
 
 }

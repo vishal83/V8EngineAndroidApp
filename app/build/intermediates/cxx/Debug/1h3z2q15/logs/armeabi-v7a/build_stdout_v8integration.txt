@@ -1,2 +1,3 @@
 ninja: Entering directory `/Users/visgupta/devel/git/V8EngineAndroidApp/app/.cxx/Debug/1h3z2q15/armeabi-v7a'
-ninja: no work to do.
+[1/2] Building CXX object CMakeFiles/v8integration.dir/quickjs_integration.cpp.o
+[2/2] Linking CXX shared library /Users/visgupta/devel/git/V8EngineAndroidApp/app/build/intermediates/cxx/Debug/1h3z2q15/obj/armeabi-v7a/libv8integration.so

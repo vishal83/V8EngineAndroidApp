@@ -57,6 +57,10 @@ class QuickJSBridge(private val context: android.content.Context) {
     private external fun isInitialized(): Boolean
     private external fun resetContext(): Boolean
     
+    // Bytecode compilation and execution methods
+    private external fun compileScript(script: String): ByteArray?
+    private external fun executeBytecode(bytecode: ByteArray): String
+    
     // HTTP polyfill native methods
     private external fun nativeHttpRequest(url: String, optionsJson: String): String
 
@@ -248,6 +252,141 @@ class QuickJSBridge(private val context: android.content.Context) {
         Log.i(TAG, "Resetting QuickJS context to clear variables")
         return resetContext() // Call native method
     }
+    
+    /**
+     * Compile JavaScript to bytecode (for testing and manual compilation)
+     */
+    fun compileJavaScriptToBytecode(script: String): ByteArray? {
+        return try {
+            if (!initialized) {
+                Log.e(TAG, "QuickJS not initialized for bytecode compilation")
+                return null
+            }
+            val bytecode = compileScript(script)
+            if (bytecode != null) {
+                Log.i(TAG, "Successfully compiled ${script.length} chars to ${bytecode.size} bytes of bytecode")
+            }
+            bytecode
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to compile JavaScript to bytecode", e)
+            null
+        }
+    }
+    
+    /**
+     * Execute bytecode directly (for testing)
+     */
+    fun executeBytecodeDirectly(bytecode: ByteArray): String {
+        return try {
+            if (!initialized) {
+                return "Error: QuickJS not initialized"
+            }
+            val result = executeBytecode(bytecode)
+            Log.i(TAG, "Executed ${bytecode.size} bytes of bytecode")
+            result
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to execute bytecode", e)
+            "Error: ${e.message}"
+        }
+    }
+    
+    /**
+     * Run bytecode compilation test with demo JavaScript
+     */
+    fun runBytecodeTest(callback: RemoteExecutionCallback) {
+        Log.i(TAG, "Starting bytecode compilation test")
+        callback.onProgress("🔨 Starting Bytecode Compilation Test...")
+        
+        CoroutineScope(Dispatchers.Main).launch {
+            try {
+                val startTime = System.currentTimeMillis()
+                
+                // Demo JavaScript for testing bytecode compilation
+                val testScript = """
+                    // Bytecode Compilation Test
+                    console.log("🔧 Testing JavaScript Bytecode Compilation");
+                    
+                    // Test 1: Basic computation
+                    function fibonacci(n) {
+                        if (n <= 1) return n;
+                        return fibonacci(n - 1) + fibonacci(n - 2);
+                    }
+                    
+                    const startTime = Date.now();
+                    const fibResult = fibonacci(15);
+                    const computeTime = Date.now() - startTime;
+                    
+                    // Test 2: Object creation and manipulation
+                    const testResult = {
+                        testName: "Bytecode Compilation Test",
+                        timestamp: new Date().toISOString(),
+                        fibonacci15: fibResult,
+                        computeTimeMs: computeTime,
+                        features: [
+                            "JavaScript to bytecode compilation",
+                            "Bytecode caching and storage",
+                            "Direct bytecode execution",
+                            "Performance comparison"
+                        ],
+                        performance: {
+                            note: "Bytecode execution is much faster than parsing source code",
+                            benefit: "50-90% faster execution on subsequent runs"
+                        }
+                    };
+                    
+                    console.log("✅ Bytecode compilation test completed");
+                    
+                    // Return JSON result
+                    return JSON.stringify(testResult, null, 2);
+                """.trimIndent()
+                
+                callback.onProgress("📝 Compiling test script to bytecode...")
+                
+                // Step 1: Compile to bytecode
+                val compilationStart = System.currentTimeMillis()
+                val bytecode = compileJavaScriptToBytecode(testScript)
+                val compilationTime = System.currentTimeMillis() - compilationStart
+                
+                if (bytecode == null) {
+                    callback.onError("BYTECODE_TEST", "Failed to compile JavaScript to bytecode")
+                    return@launch
+                }
+                
+                callback.onProgress("⚡ Executing compiled bytecode...")
+                
+                // Step 2: Execute bytecode
+                val executionStart = System.currentTimeMillis()
+                val result = executeBytecodeDirectly(bytecode)
+                val executionTime = System.currentTimeMillis() - executionStart
+                
+                val totalTime = System.currentTimeMillis() - startTime
+                
+                // Create execution result
+                val executionResult = RemoteExecutionResult(
+                    url = "BYTECODE_TEST",
+                    fileName = "bytecode_test.js",
+                    timestamp = System.currentTimeMillis(),
+                    success = !result.startsWith("Error:") && !result.startsWith("JavaScript Error:") && !result.startsWith("Bytecode Error:"),
+                    result = result,
+                    executionTimeMs = executionTime,
+                    contentLength = bytecode.size
+                )
+                
+                // Add to history
+                executionHistory.add(0, executionResult)
+                if (executionHistory.size > 50) {
+                    executionHistory.removeAt(executionHistory.size - 1)
+                }
+                
+                Log.i(TAG, "✅ Bytecode test completed - Compilation: ${compilationTime}ms, Execution: ${executionTime}ms, Bytecode: ${bytecode.size} bytes")
+                callback.onSuccess(executionResult)
+                
+            } catch (e: Exception) {
+                Log.e(TAG, "Bytecode test failed", e)
+                callback.onError("BYTECODE_TEST", "Bytecode test failed: ${e.message}")
+            }
+        }
+    }
 
     /**
      * Handle HTTP request from JavaScript (called from native code)
@@ -415,14 +554,20 @@ class QuickJSBridge(private val context: android.content.Context) {
                     callback.onProgress("⚡ Executing cached bytecode...")
                     val executionStartTime = System.currentTimeMillis()
                     
-                    val result = executeScript(String(cachedBytecode)) // Note: This needs to be updated to support bytecode execution
+                    // Reset context to prevent variable redeclaration issues
+                    if (!resetQuickJSContext()) {
+                        Log.w(TAG, "Failed to reset context for bytecode execution, continuing...")
+                    }
+                    
+                    // Execute the compiled bytecode directly (much faster than parsing source)
+                    val result = executeBytecode(cachedBytecode)
                     val executionTime = System.currentTimeMillis() - executionStartTime
                     
                     val executionResult = RemoteExecutionResult(
                         url = url,
                         fileName = networkService.getFileNameFromUrl(url),
                         timestamp = System.currentTimeMillis(),
-                        success = !result.startsWith("Error:") && !result.startsWith("JavaScript Error:"),
+                        success = !result.startsWith("Error:") && !result.startsWith("JavaScript Error:") && !result.startsWith("Bytecode Error:"),
                         result = result,
                         executionTimeMs = executionTime,
                         contentLength = cachedBytecode.size
@@ -433,7 +578,7 @@ class QuickJSBridge(private val context: android.content.Context) {
                         executionHistory.removeAt(executionHistory.size - 1)
                     }
                     
-                    Log.i(TAG, "✅ Executed cached bytecode for: $url")
+                    Log.i(TAG, "✅ Executed cached bytecode for: $url (${cachedBytecode.size} bytes, ${executionTime}ms)")
                     callback.onSuccess(executionResult)
                     return@launch
                 }
@@ -455,6 +600,24 @@ class QuickJSBridge(private val context: android.content.Context) {
                         }
                         
                         val sanitizedCode = networkService.sanitizeJavaScript(cachedEntry.sourceCode)
+                        
+                        // Try to compile and cache bytecode if not already cached (async, don't block execution)
+                        if (cachedEntry.bytecode == null) {
+                            CoroutineScope(Dispatchers.IO).launch {
+                                try {
+                                    val bytecode = compileScript(sanitizedCode)
+                                    if (bytecode != null) {
+                                        val cached = cacheService.cacheBytecode(url, bytecode)
+                                        if (cached) {
+                                            Log.i(TAG, "✅ Compiled and cached bytecode for cached source: $url (${bytecode.size} bytes)")
+                                        }
+                                    }
+                                } catch (e: Exception) {
+                                    Log.w(TAG, "Background bytecode compilation failed for cached source: $url", e)
+                                }
+                            }
+                        }
+                        
                         // Use isolated execution for cached scripts to prevent variable conflicts
                         val result = runJavaScript(sanitizedCode, isolatedExecution = true)
                         val executionTime = System.currentTimeMillis() - executionStartTime
@@ -510,6 +673,27 @@ class QuickJSBridge(private val context: android.content.Context) {
                         // Sanitize and execute
                         val sanitizedCode = networkService.sanitizeJavaScript(networkResult.content)
                         val executionStart = System.currentTimeMillis()
+                        
+                        // Compile to bytecode for future caching (async, don't block execution)
+                        CoroutineScope(Dispatchers.IO).launch {
+                            try {
+                                callback.onProgress("🔨 Compiling JavaScript to bytecode...")
+                                val bytecode = compileScript(sanitizedCode)
+                                if (bytecode != null) {
+                                    val cached = cacheService.cacheBytecode(url, bytecode)
+                                    if (cached) {
+                                        Log.i(TAG, "✅ Compiled and cached bytecode for: $url (${bytecode.size} bytes)")
+                                    } else {
+                                        Log.w(TAG, "Failed to cache compiled bytecode for: $url")
+                                    }
+                                } else {
+                                    Log.w(TAG, "Failed to compile JavaScript to bytecode for: $url")
+                                }
+                            } catch (e: Exception) {
+                                Log.w(TAG, "Bytecode compilation failed for: $url", e)
+                            }
+                        }
+                        
                         // Use isolated execution for downloaded scripts to prevent variable conflicts
                         val result = runJavaScript(sanitizedCode, isolatedExecution = true)
                         val executionTime = System.currentTimeMillis() - executionStart
@@ -577,6 +761,7 @@ class QuickJSBridge(private val context: android.content.Context) {
             "Test HTTP Polyfills" to "LOCAL_SERVER/test_fetch_polyfill.js", // Test fetch() and XMLHttpRequest
             "Test Cache System (Fast)" to "LOCAL_SERVER/test_cache_system_fast.js", // Fast cache test
             "Test Cache System" to "LOCAL_SERVER/test_cache_system.js", // Full cache test with HTTP
+            "Test Bytecode Compilation" to "BYTECODE_TEST", // Test bytecode compilation and execution
             "Lodash Utility" to "https://cdn.jsdelivr.net/npm/lodash@4.17.21/lodash.min.js",
             "Moment.js Date" to "https://cdn.jsdelivr.net/npm/moment@2.29.4/moment.min.js",
             "Math.js Library" to "https://cdn.jsdelivr.net/npm/mathjs@11.11.0/lib/browser/math.min.js",
