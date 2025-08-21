@@ -25,6 +25,249 @@ extern "C" {
 #include "quickjs/quickjs-libc.h"
 }
 
+// Global JavaVM reference for JNI calls from native threads
+JavaVM *g_jvm = nullptr;
+
+// Global references for HTTP polyfills
+static jobject g_quickjsBridgeInstance = nullptr;
+static jmethodID g_handleHttpRequestMethod = nullptr;
+
+// Forward declarations
+static JSValue js_http_request(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv);
+void initializeHttpPolyfill(JNIEnv *env, jobject bridgeInstance);
+void addHttpPolyfills(JSContext *ctx);
+
+// Native HTTP request function (called from JavaScript)
+static JSValue js_http_request(JSContext *ctx, JSValueConst this_val, int argc, JSValueConst *argv) {
+    if (argc < 1 || !g_quickjsBridgeInstance || !g_handleHttpRequestMethod) {
+        return JS_ThrowReferenceError(ctx, "HTTP service not available");
+    }
+    
+    // Get URL from first argument
+    const char *url = JS_ToCString(ctx, argv[0]);
+    if (!url) {
+        return JS_ThrowTypeError(ctx, "URL must be a string");
+    }
+    
+    // Get options from second argument (or empty object)
+    const char *options = "{}";
+    if (argc > 1) {
+        options = JS_ToCString(ctx, argv[1]);
+        if (!options) {
+            JS_FreeCString(ctx, url);
+            return JS_ThrowTypeError(ctx, "Options must be an object");
+        }
+    }
+    
+    // Get JNI environment
+    JNIEnv *env = nullptr;
+    
+    // This is a simplified approach - in production you'd want proper JVM attachment
+    if (!g_jvm || g_jvm->GetEnv((void**)&env, JNI_VERSION_1_6) != JNI_OK) {
+        JS_FreeCString(ctx, url);
+        if (argc > 1) JS_FreeCString(ctx, options);
+        return JS_ThrowInternalError(ctx, "Failed to get JNI environment");
+    }
+    
+    // Call Java method
+    jstring jUrl = env->NewStringUTF(url);
+    jstring jOptions = env->NewStringUTF(options);
+    
+    jstring jResult = (jstring)env->CallObjectMethod(g_quickjsBridgeInstance, 
+        g_handleHttpRequestMethod, jUrl, jOptions);
+    
+    env->DeleteLocalRef(jUrl);
+    env->DeleteLocalRef(jOptions);
+    
+    if (env->ExceptionCheck()) {
+        env->ExceptionClear();
+        JS_FreeCString(ctx, url);
+        if (argc > 1) JS_FreeCString(ctx, options);
+        return JS_ThrowInternalError(ctx, "HTTP request failed");
+    }
+    
+    // Convert result back to JavaScript
+    const char *resultStr = env->GetStringUTFChars(jResult, nullptr);
+    JSValue result = JS_ParseJSON(ctx, resultStr, strlen(resultStr), "<http-response>");
+    
+    env->ReleaseStringUTFChars(jResult, resultStr);
+    env->DeleteLocalRef(jResult);
+    
+    JS_FreeCString(ctx, url);
+    if (argc > 1) JS_FreeCString(ctx, options);
+    
+    return result;
+}
+
+// Initialize HTTP polyfill references
+void initializeHttpPolyfill(JNIEnv *env, jobject bridgeInstance) {
+    if (g_quickjsBridgeInstance) {
+        env->DeleteGlobalRef(g_quickjsBridgeInstance);
+    }
+    g_quickjsBridgeInstance = env->NewGlobalRef(bridgeInstance);
+    
+    jclass bridgeClass = env->GetObjectClass(bridgeInstance);
+    g_handleHttpRequestMethod = env->GetMethodID(bridgeClass, "handleHttpRequest", 
+        "(Ljava/lang/String;Ljava/lang/String;)Ljava/lang/String;");
+    
+    if (!g_handleHttpRequestMethod) {
+        LOGE("Failed to find handleHttpRequest method");
+    }
+}
+
+// Add HTTP polyfills to QuickJS context
+void addHttpPolyfills(JSContext *ctx) {
+    // Add native HTTP request function
+    JSValue global = JS_GetGlobalObject(ctx);
+    JS_SetPropertyStr(ctx, global, "_nativeHttpRequest", 
+        JS_NewCFunction(ctx, js_http_request, "_nativeHttpRequest", 2));
+    
+    // Add fetch polyfill
+    const char *fetchPolyfill = R"(
+(function() {
+    // Fetch API polyfill
+    globalThis.fetch = function(url, options) {
+        options = options || {};
+        
+        return new Promise(function(resolve, reject) {
+            try {
+                var requestOptions = {
+                    method: options.method || 'GET',
+                    headers: options.headers || {},
+                    body: options.body || null,
+                    timeout: options.timeout || 30000,
+                    redirect: options.redirect || 'follow',
+                    credentials: options.credentials || 'same-origin'
+                };
+                
+                var response = _nativeHttpRequest(url, JSON.stringify(requestOptions));
+                
+                if (response && response.status !== undefined) {
+                    // Create Response object
+                    var responseObj = {
+                        status: response.status,
+                        statusText: response.statusText,
+                        ok: response.ok,
+                        redirected: response.redirected,
+                        url: response.url,
+                        type: response.type,
+                        headers: new Map(Object.entries(response.headers || {})),
+                        
+                        text: function() {
+                            return Promise.resolve(response.body || '');
+                        },
+                        
+                        json: function() {
+                            return Promise.resolve(JSON.parse(response.body || '{}'));
+                        },
+                        
+                        blob: function() {
+                            return Promise.reject(new Error('Blob not supported'));
+                        },
+                        
+                        arrayBuffer: function() {
+                            return Promise.reject(new Error('ArrayBuffer not supported'));
+                        }
+                    };
+                    
+                    resolve(responseObj);
+                } else {
+                    reject(new Error('Network request failed'));
+                }
+            } catch (e) {
+                reject(e);
+            }
+        });
+    };
+    
+    // XMLHttpRequest polyfill
+    globalThis.XMLHttpRequest = function() {
+        this.readyState = 0;
+        this.status = 0;
+        this.statusText = '';
+        this.responseText = '';
+        this.responseXML = null;
+        this.onreadystatechange = null;
+        this._method = 'GET';
+        this._url = '';
+        this._headers = {};
+        this._body = null;
+        
+        this.open = function(method, url, async) {
+            this._method = method;
+            this._url = url;
+            this.readyState = 1;
+            if (this.onreadystatechange) this.onreadystatechange();
+        };
+        
+        this.setRequestHeader = function(header, value) {
+            this._headers[header] = value;
+        };
+        
+        this.send = function(body) {
+            var self = this;
+            this._body = body;
+            this.readyState = 2;
+            if (this.onreadystatechange) this.onreadystatechange();
+            
+            try {
+                var options = {
+                    method: this._method,
+                    headers: this._headers,
+                    body: this._body
+                };
+                
+                var response = _nativeHttpRequest(this._url, JSON.stringify(options));
+                
+                this.status = response.status || 0;
+                this.statusText = response.statusText || '';
+                this.responseText = response.body || '';
+                this.readyState = 4;
+                
+                if (this.onreadystatechange) this.onreadystatechange();
+            } catch (e) {
+                this.status = 0;
+                this.statusText = 'Error';
+                this.responseText = '';
+                this.readyState = 4;
+                if (this.onreadystatechange) this.onreadystatechange();
+            }
+        };
+        
+        this.abort = function() {
+            this.readyState = 0;
+        };
+        
+        this.getAllResponseHeaders = function() {
+            return '';
+        };
+        
+        this.getResponseHeader = function(header) {
+            return null;
+        };
+    };
+    
+    // Constants
+    globalThis.XMLHttpRequest.UNSENT = 0;
+    globalThis.XMLHttpRequest.OPENED = 1;
+    globalThis.XMLHttpRequest.HEADERS_RECEIVED = 2;
+    globalThis.XMLHttpRequest.LOADING = 3;
+    globalThis.XMLHttpRequest.DONE = 4;
+})();
+)";
+    
+    JSValue result = JS_Eval(ctx, fetchPolyfill, strlen(fetchPolyfill), "<fetch-polyfill>", JS_EVAL_TYPE_GLOBAL);
+    if (JS_IsException(result)) {
+        JSValue exception = JS_GetException(ctx);
+        const char *exceptionStr = JS_ToCString(ctx, exception);
+        LOGE("Failed to add HTTP polyfills: %s", exceptionStr ? exceptionStr : "Unknown error");
+        if (exceptionStr) JS_FreeCString(ctx, exceptionStr);
+        JS_FreeValue(ctx, exception);
+    }
+    JS_FreeValue(ctx, result);
+    JS_FreeValue(ctx, global);
+}
+
 // Real QuickJS Engine implementation
 class RealQuickJSEngine {
 public:
@@ -60,9 +303,12 @@ public:
 
         // Add standard library
         js_std_add_helpers(context, 0, nullptr);
+        
+        // Add HTTP polyfills (fetch and XMLHttpRequest)
+        addHttpPolyfills(context);
 
         initialized = true;
-        LOGI("QuickJS Engine initialized successfully with memory management");
+        LOGI("QuickJS Engine initialized successfully with memory management and HTTP polyfills");
         return true;
     }
     
@@ -149,11 +395,19 @@ extern "C" {
 // Initialize QuickJS Engine
 JNIEXPORT jboolean JNICALL
 Java_com_visgupta_example_v8integrationandroidapp_QuickJSBridge_initializeQuickJS(JNIEnv *env, jobject thiz) {
-    LOGI("JNI: Initializing Real QuickJS Engine");
+    LOGI("JNI: Initializing Real QuickJS Engine with HTTP polyfills");
+    
+    // Store JavaVM reference for HTTP requests
+    if (!g_jvm) {
+        env->GetJavaVM(&g_jvm);
+    }
     
     if (g_quickjsEngine == nullptr) {
         g_quickjsEngine = new RealQuickJSEngine();
     }
+    
+    // Initialize HTTP polyfill references
+    initializeHttpPolyfill(env, thiz);
     
     return g_quickjsEngine->initialize() ? JNI_TRUE : JNI_FALSE;
 }
@@ -352,6 +606,14 @@ Java_com_visgupta_example_v8integrationandroidapp_QuickJSBridge_nativeGetMemoryS
     stats += "Usage: " + std::to_string((int)usage_percent) + "%";
     
     return env->NewStringUTF(stats.c_str());
+}
+
+// HTTP request JNI function
+JNIEXPORT jstring JNICALL
+Java_com_visgupta_example_v8integrationandroidapp_QuickJSBridge_nativeHttpRequest(JNIEnv *env, jobject thiz, jstring url, jstring options) {
+    // This function is not directly used but kept for compatibility
+    // The actual HTTP requests go through js_http_request -> handleHttpRequest
+    return env->NewStringUTF("{}");
 }
 
 }

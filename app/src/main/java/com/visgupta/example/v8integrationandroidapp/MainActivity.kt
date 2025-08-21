@@ -969,6 +969,11 @@ fun RemoteJSTestTab(quickJSBridge: QuickJSBridge) {
                                             remoteUrl = quickJSBridge.buildLocalServerUrl(localServerIp, localServerPort)
                                             selectedPopularUrl = name
                                             showLocalServerConfig = true
+                                        } else if (name == "Test HTTP Polyfills") {
+                                            // Handle HTTP polyfills test
+                                            remoteUrl = quickJSBridge.buildLocalServerUrl(localServerIp, localServerPort, "test_fetch_polyfill.js")
+                                            selectedPopularUrl = name
+                                            showLocalServerConfig = true
                                         } else {
                                             remoteUrl = url
                                             selectedPopularUrl = name
@@ -1016,6 +1021,8 @@ fun RemoteJSTestTab(quickJSBridge: QuickJSBridge) {
                                         localServerIp = it
                                         if (selectedPopularUrl == "Test Remote Script") {
                                             remoteUrl = quickJSBridge.buildLocalServerUrl(localServerIp, localServerPort)
+                                        } else if (selectedPopularUrl == "Test HTTP Polyfills") {
+                                            remoteUrl = quickJSBridge.buildLocalServerUrl(localServerIp, localServerPort, "test_fetch_polyfill.js")
                                         }
                                     },
                                     label = { Text("IP Address") },
@@ -1031,6 +1038,8 @@ fun RemoteJSTestTab(quickJSBridge: QuickJSBridge) {
                                         localServerPort = it
                                         if (selectedPopularUrl == "Test Remote Script") {
                                             remoteUrl = quickJSBridge.buildLocalServerUrl(localServerIp, localServerPort)
+                                        } else if (selectedPopularUrl == "Test HTTP Polyfills") {
+                                            remoteUrl = quickJSBridge.buildLocalServerUrl(localServerIp, localServerPort, "test_fetch_polyfill.js")
                                         }
                                     },
                                     label = { Text("Port") },

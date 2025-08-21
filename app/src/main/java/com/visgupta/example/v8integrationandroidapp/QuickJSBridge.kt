@@ -4,6 +4,7 @@ import android.util.Log
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
 
 /**
@@ -29,6 +30,7 @@ class QuickJSBridge {
 
     // Network service for remote JavaScript loading
     private val networkService = NetworkService()
+    private val httpService = HttpService()
     
     // Execution history for remote scripts
     private val executionHistory = mutableListOf<RemoteExecutionResult>()
@@ -38,6 +40,9 @@ class QuickJSBridge {
     private external fun executeScript(script: String): String
     private external fun cleanupQuickJS()
     private external fun isInitialized(): Boolean
+    
+    // HTTP polyfill native methods
+    private external fun nativeHttpRequest(url: String, optionsJson: String): String
 
     // ByteTransfer integration methods (native)
     private external fun nativeTestByteTransfer(data: ByteArray, bufferName: String?): Boolean
@@ -247,10 +252,43 @@ class QuickJSBridge {
     }
 
     /**
+     * Handle HTTP request from JavaScript (called from native code)
+     * This method is called from the native HTTP polyfill implementation
+     */
+    fun handleHttpRequest(url: String, optionsJson: String): String {
+        return try {
+            Log.d(TAG, "Handling HTTP request from JS: $url")
+            
+            val options = httpService.parseRequestOptions(optionsJson)
+            
+            // Execute the request synchronously for now (JavaScript will handle async)
+            val response = runBlocking {
+                httpService.executeRequest(url, options)
+            }
+            
+            val responseJson = httpService.responseToJson(response)
+            Log.d(TAG, "HTTP request completed: ${response.status}")
+            
+            responseJson
+        } catch (e: Exception) {
+            Log.e(TAG, "Error handling HTTP request", e)
+            val errorResponse = HttpService.HttpResponse(
+                status = 0,
+                statusText = "Internal Error: ${e.message}",
+                headers = emptyMap(),
+                body = "",
+                url = url
+            )
+            httpService.responseToJson(errorResponse)
+        }
+    }
+
+    /**
      * Cleanup QuickJS resources
      */
     fun cleanup() {
         Log.i(TAG, "Cleaning up QuickJS Bridge")
+        httpService.cleanup()
         cleanupQuickJS()
         initialized = false
         Log.i(TAG, "QuickJS Bridge cleanup complete")
@@ -422,6 +460,7 @@ class QuickJSBridge {
     fun getPopularJavaScriptUrls(): List<Pair<String, String>> {
         return listOf(
             "Test Remote Script" to "LOCAL_SERVER/test_remote_script.js", // Placeholder for local server
+            "Test HTTP Polyfills" to "LOCAL_SERVER/test_fetch_polyfill.js", // Test fetch() and XMLHttpRequest
             "Lodash Utility" to "https://cdn.jsdelivr.net/npm/lodash@4.17.21/lodash.min.js",
             "Moment.js Date" to "https://cdn.jsdelivr.net/npm/moment@2.29.4/moment.min.js",
             "Math.js Library" to "https://cdn.jsdelivr.net/npm/mathjs@11.11.0/lib/browser/math.min.js",
