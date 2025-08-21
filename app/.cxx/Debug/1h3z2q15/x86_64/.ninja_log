@@ -1,4 +1,22 @@
 # ninja log v5
-0	671	1754981624047827775	CMakeFiles/v8integration.dir/v8integration.cpp.o	cdc32e1ba6c5b901
-1	779	1754981624154160317	CMakeFiles/v8integration.dir/bytetransfer.cpp.o	1f6d08c34869adb6
-779	854	1754981624233166093	/Users/visgupta/devel/git/V8EngineAndroidApp/app/build/intermediates/cxx/Debug/1h3z2q15/obj/x86_64/libv8integration.so	c4ca11618bd40d03
+3	917	1755714919261322001	CMakeFiles/v8integration.dir/quickjs_integration.cpp.o	b042d73222f3a037
+4	275	1755714918620938116	CMakeFiles/v8integration.dir/quickjs/libunicode.c.o	969a9270779cad8e
+3	1155	1755714919480775426	CMakeFiles/v8integration.dir/quickjs/quickjs.c.o	7c22ac6d35a1d353
+2	800	1755714919144197891	CMakeFiles/v8integration.dir/v8integration.cpp.o	f7d2acae2b336929
+3	266	1755714918606093446	CMakeFiles/v8integration.dir/quickjs/cutils.c.o	5df0a1360b2989fc
+3	900	1755714919243330404	CMakeFiles/v8integration.dir/bytetransfer.cpp.o	78553e403756eb4c
+1155	1243	1755714919584643870	/Users/visgupta/devel/git/V8EngineAndroidApp/app/build/intermediates/cxx/Debug/1h3z2q15/obj/x86_64/libv8integration.so	8778f8e1fe349391
+4	269	1755714918613594552	CMakeFiles/v8integration.dir/quickjs/dtoa.c.o	4ee5d1961eb075a2
+4	278	1755714918621194909	CMakeFiles/v8integration.dir/quickjs/libregexp.c.o	6c099d96ae0d1fab
+0	22	0	clean	ebcad5f0509e1c72
+4	361	1755714918704124914	CMakeFiles/v8integration.dir/quickjs/quickjs-libc.c.o	fc695596551cbe55
+3	613	1755715726234870246	CMakeFiles/v8integration.dir/quickjs_integration.cpp.o	b042d73222f3a037
+613	688	1755715726304455585	/Users/visgupta/devel/git/V8EngineAndroidApp/app/build/intermediates/cxx/Debug/1h3z2q15/obj/x86_64/libv8integration.so	8778f8e1fe349391
+4	722	1755770753684247378	CMakeFiles/v8integration.dir/quickjs_integration.cpp.o	b042d73222f3a037
+722	826	1755770753787320053	/Users/visgupta/devel/git/V8EngineAndroidApp/app/build/intermediates/cxx/Debug/1h3z2q15/obj/x86_64/libv8integration.so	8778f8e1fe349391
+3	655	1755792476698958473	CMakeFiles/v8integration.dir/quickjs_integration.cpp.o	b042d73222f3a037
+655	737	1755792476781498108	/Users/visgupta/devel/git/V8EngineAndroidApp/app/build/intermediates/cxx/Debug/1h3z2q15/obj/x86_64/libv8integration.so	8778f8e1fe349391
+4	831	1755793946530322719	CMakeFiles/v8integration.dir/quickjs_integration.cpp.o	b042d73222f3a037
+832	963	1755793946665533244	/Users/visgupta/devel/git/V8EngineAndroidApp/app/build/intermediates/cxx/Debug/1h3z2q15/obj/x86_64/libv8integration.so	8778f8e1fe349391
+4	717	1755794296202199840	CMakeFiles/v8integration.dir/quickjs_integration.cpp.o	b042d73222f3a037
+717	811	1755794296314188173	/Users/visgupta/devel/git/V8EngineAndroidApp/app/build/intermediates/cxx/Debug/1h3z2q15/obj/x86_64/libv8integration.so	8778f8e1fe349391

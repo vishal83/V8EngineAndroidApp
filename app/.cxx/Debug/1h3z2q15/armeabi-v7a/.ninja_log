@@ -1,4 +1,22 @@
 # ninja log v5
-0	770	1754981622336777184	CMakeFiles/v8integration.dir/v8integration.cpp.o	31b00f185f03e339
-0	877	1754981622442924058	CMakeFiles/v8integration.dir/bytetransfer.cpp.o	20617a9f462971f8
-877	942	1754981622509989236	/Users/visgupta/devel/git/V8EngineAndroidApp/app/build/intermediates/cxx/Debug/1h3z2q15/obj/armeabi-v7a/libv8integration.so	9bc3e9543be59d1e
+3	813	1755714916790029781	CMakeFiles/v8integration.dir/quickjs_integration.cpp.o	9624bd230480183a
+3	165	1755714916138196153	CMakeFiles/v8integration.dir/quickjs/libunicode.c.o	99ce6cd6dac4c2dd
+3	1561	1755714917519362606	CMakeFiles/v8integration.dir/quickjs/quickjs.c.o	1f9085cec14d72c9
+2	679	1755714916660613675	CMakeFiles/v8integration.dir/v8integration.cpp.o	b32bf60ca17b9fd7
+3	114	1755714916098764115	CMakeFiles/v8integration.dir/quickjs/cutils.c.o	38e08c883ac1a548
+2	812	1755714916789069612	CMakeFiles/v8integration.dir/bytetransfer.cpp.o	2ceb06e8e4be7955
+1561	1673	1755714917656290693	/Users/visgupta/devel/git/V8EngineAndroidApp/app/build/intermediates/cxx/Debug/1h3z2q15/obj/armeabi-v7a/libv8integration.so	a786b375ed56bae3
+3	248	1755714916231631440	CMakeFiles/v8integration.dir/quickjs/quickjs-libc.c.o	84ae47efd60cb16c
+0	20	0	clean	ebcad5f0509e1c72
+3	162	1755714916137615443	CMakeFiles/v8integration.dir/quickjs/libregexp.c.o	c810d2f84ff3922d
+3	139	1755714916122611355	CMakeFiles/v8integration.dir/quickjs/dtoa.c.o	24680e89a38da48c
+2	676	1755715725143795081	CMakeFiles/v8integration.dir/quickjs_integration.cpp.o	9624bd230480183a
+676	751	1755715725218414576	/Users/visgupta/devel/git/V8EngineAndroidApp/app/build/intermediates/cxx/Debug/1h3z2q15/obj/armeabi-v7a/libv8integration.so	a786b375ed56bae3
+2	1007	1755770752835885411	CMakeFiles/v8integration.dir/quickjs_integration.cpp.o	9624bd230480183a
+1007	1097	1755770752926201377	/Users/visgupta/devel/git/V8EngineAndroidApp/app/build/intermediates/cxx/Debug/1h3z2q15/obj/armeabi-v7a/libv8integration.so	a786b375ed56bae3
+3	614	1755792475881228773	CMakeFiles/v8integration.dir/quickjs_integration.cpp.o	9624bd230480183a
+615	722	1755792476004001946	/Users/visgupta/devel/git/V8EngineAndroidApp/app/build/intermediates/cxx/Debug/1h3z2q15/obj/armeabi-v7a/libv8integration.so	a786b375ed56bae3
+5	1010	1755793945543436792	CMakeFiles/v8integration.dir/quickjs_integration.cpp.o	9624bd230480183a
+1010	1110	1755793945649684471	/Users/visgupta/devel/git/V8EngineAndroidApp/app/build/intermediates/cxx/Debug/1h3z2q15/obj/armeabi-v7a/libv8integration.so	a786b375ed56bae3
+3	1030	1755794295260885309	CMakeFiles/v8integration.dir/quickjs_integration.cpp.o	9624bd230480183a
+1030	1241	1755794295472796659	/Users/visgupta/devel/git/V8EngineAndroidApp/app/build/intermediates/cxx/Debug/1h3z2q15/obj/armeabi-v7a/libv8integration.so	a786b375ed56bae3
