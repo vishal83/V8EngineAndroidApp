@@ -1,6 +1,10 @@
 package com.visgupta.example.v8integrationandroidapp
 
 import android.util.Log
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 
 /**
  * Bridge class for QuickJS JavaScript engine integration
@@ -22,6 +26,12 @@ class QuickJSBridge {
             }
         }
     }
+
+    // Network service for remote JavaScript loading
+    private val networkService = NetworkService()
+    
+    // Execution history for remote scripts
+    private val executionHistory = mutableListOf<RemoteExecutionResult>()
 
     // Native method declarations
     private external fun initializeQuickJS(): Boolean
@@ -76,9 +86,10 @@ class QuickJSBridge {
     /**
      * Execute JavaScript code in QuickJS engine
      * @param jsCode The JavaScript code to execute
+     * @param isolatedExecution Whether to execute in an isolated context to avoid variable conflicts
      * @return The result of the JavaScript execution as a string
      */
-    fun runJavaScript(jsCode: String): String {
+    fun runJavaScript(jsCode: String, isolatedExecution: Boolean = false): String {
         if (!initialized) {
             val error = "❌ QuickJS Bridge not initialized. Call initialize() first."
             Log.e(TAG, error)
@@ -100,10 +111,18 @@ class QuickJSBridge {
         Log.i(TAG, "Executing JavaScript in QuickJS: $jsCode")
 
         try {
-            val result = executeScript(jsCode)
+            // Wrap in IIFE if isolated execution is requested
+            val finalCode = if (isolatedExecution) {
+                // For isolated execution, wrap in IIFE and ensure proper return
+                "(function() { \n$jsCode\n })();"
+            } else {
+                jsCode
+            }
+            
+            val result = executeScript(finalCode)
             Log.i(TAG, "QuickJS result: $result")
 
-            if (result.startsWith("Error:")) {
+            if (result.startsWith("Error:") || result.startsWith("JavaScript Error:")) {
                 Log.w(TAG, "JavaScript execution returned error: $result")
             }
 
@@ -197,6 +216,37 @@ class QuickJSBridge {
     }
 
     /**
+     * Reset QuickJS context to clear variables and avoid conflicts
+     */
+    fun resetContext(): Boolean {
+        if (!initialized) {
+            Log.w(TAG, "Cannot reset context: QuickJS not initialized")
+            return false
+        }
+        
+        Log.i(TAG, "Resetting QuickJS context to clear variables")
+        
+        try {
+            // Cleanup and reinitialize to get a fresh context
+            cleanupQuickJS()
+            val success = initializeQuickJS()
+            
+            if (success) {
+                Log.i(TAG, "QuickJS context reset successfully")
+            } else {
+                Log.e(TAG, "Failed to reinitialize QuickJS after context reset")
+                initialized = false
+            }
+            
+            return success
+        } catch (e: Exception) {
+            Log.e(TAG, "Error during context reset", e)
+            initialized = false
+            return false
+        }
+    }
+
+    /**
      * Cleanup QuickJS resources
      */
     fun cleanup() {
@@ -244,4 +294,199 @@ class QuickJSBridge {
     }
 
     private external fun nativeGetMemoryStats(): String
+    
+    /**
+     * Data class for remote execution results
+     */
+    data class RemoteExecutionResult(
+        val url: String,
+        val fileName: String,
+        val timestamp: Long,
+        val success: Boolean,
+        val result: String,
+        val executionTimeMs: Long,
+        val contentLength: Int
+    )
+    
+    /**
+     * Callback interface for remote JavaScript execution
+     */
+    interface RemoteExecutionCallback {
+        fun onProgress(message: String)
+        fun onSuccess(result: RemoteExecutionResult)
+        fun onError(url: String, error: String)
+    }
+    
+    /**
+     * Execute JavaScript code from a remote URL
+     * @param url The URL to fetch JavaScript from
+     * @param callback Callback for handling results
+     */
+    fun executeRemoteJavaScript(url: String, callback: RemoteExecutionCallback) {
+        if (!initialized) {
+            callback.onError(url, "❌ QuickJS Bridge not initialized. Call initialize() first.")
+            return
+        }
+        
+        if (url.isBlank()) {
+            callback.onError(url, "❌ URL cannot be empty")
+            return
+        }
+        
+        Log.i(TAG, "Starting remote JavaScript execution from: $url")
+        callback.onProgress("🌐 Fetching JavaScript from server...")
+        
+        // Use coroutine for network operation
+        CoroutineScope(Dispatchers.Main).launch {
+            try {
+                val startTime = System.currentTimeMillis()
+                
+                // Fetch JavaScript from remote server
+                val networkResult = withContext(Dispatchers.IO) {
+                    networkService.fetchJavaScript(url)
+                }
+                
+                when (networkResult) {
+                    is NetworkService.NetworkResult.Success -> {
+                        callback.onProgress("✅ JavaScript fetched, executing...")
+                        
+                        // Validate content
+                        if (!networkService.isJavaScriptContent(networkResult.contentType, url)) {
+                            Log.w(TAG, "Content may not be JavaScript: ${networkResult.contentType}")
+                            callback.onProgress("⚠️ Content may not be JavaScript, executing anyway...")
+                        }
+                        
+                        // Sanitize and execute
+                        val sanitizedCode = networkService.sanitizeJavaScript(networkResult.content)
+                        val executionStart = System.currentTimeMillis()
+                        val result = executeScript(sanitizedCode)
+                        val executionTime = System.currentTimeMillis() - executionStart
+                        
+                        // Create result object
+                        val fileName = networkService.getFileNameFromUrl(url)
+                        val executionResult = RemoteExecutionResult(
+                            url = url,
+                            fileName = fileName,
+                            timestamp = System.currentTimeMillis(),
+                            success = !result.startsWith("Error:"),
+                            result = result,
+                            executionTimeMs = executionTime,
+                            contentLength = networkResult.content.length
+                        )
+                        
+                        // Store in history
+                        executionHistory.add(0, executionResult) // Add to beginning
+                        if (executionHistory.size > 50) { // Keep last 50 executions
+                            executionHistory.removeAt(executionHistory.size - 1)
+                        }
+                        
+                        val totalTime = System.currentTimeMillis() - startTime
+                        Log.i(TAG, "Remote JavaScript execution completed in ${totalTime}ms (network: ${totalTime - executionTime}ms, execution: ${executionTime}ms)")
+                        
+                        callback.onSuccess(executionResult)
+                    }
+                    
+                    is NetworkService.NetworkResult.Error -> {
+                        val errorMsg = "Network error: ${networkResult.message}"
+                        Log.e(TAG, errorMsg)
+                        callback.onError(url, errorMsg)
+                    }
+                }
+                
+            } catch (e: Exception) {
+                val errorMsg = "Unexpected error during remote execution: ${e.message}"
+                Log.e(TAG, errorMsg, e)
+                callback.onError(url, errorMsg)
+            }
+        }
+    }
+    
+    /**
+     * Get execution history
+     */
+    fun getExecutionHistory(): List<RemoteExecutionResult> {
+        return executionHistory.toList()
+    }
+    
+    /**
+     * Clear execution history
+     */
+    fun clearExecutionHistory() {
+        executionHistory.clear()
+        Log.i(TAG, "Execution history cleared")
+    }
+    
+    /**
+     * Get popular JavaScript CDN URLs for testing
+     */
+    fun getPopularJavaScriptUrls(): List<Pair<String, String>> {
+        return listOf(
+            "Test Remote Script" to "LOCAL_SERVER/test_remote_script.js", // Placeholder for local server
+            "Lodash Utility" to "https://cdn.jsdelivr.net/npm/lodash@4.17.21/lodash.min.js",
+            "Moment.js Date" to "https://cdn.jsdelivr.net/npm/moment@2.29.4/moment.min.js",
+            "Math.js Library" to "https://cdn.jsdelivr.net/npm/mathjs@11.11.0/lib/browser/math.min.js",
+            "Simple Test Script" to "https://raw.githubusercontent.com/mdn/beginner-html-site-scripted/gh-pages/scripts/main.js",
+            "D3.js Visualization" to "https://cdn.jsdelivr.net/npm/d3@7.8.5/dist/d3.min.js"
+        )
+    }
+    
+    /**
+     * Build URL for local server script
+     */
+    fun buildLocalServerUrl(ip: String, port: String, script: String = "test_remote_script.js"): String {
+        val cleanIp = ip.trim()
+        val cleanPort = port.trim()
+        
+        return if (cleanIp.isNotEmpty() && cleanPort.isNotEmpty()) {
+            "http://$cleanIp:$cleanPort/$script"
+        } else {
+            "http://192.168.1.100:8000/$script" // Default example
+        }
+    }
+    
+    /**
+     * Test remote execution with a simple script
+     */
+    fun testRemoteExecution(callback: RemoteExecutionCallback) {
+        // Create a simple test script with unique variable names to avoid conflicts
+        val testScript = """
+            // QuickJS Internal Test Script
+            (function() {
+                const testMessage = "Hello from Internal Test Script!";
+                const testTimestamp = new Date().toISOString();
+                const testResult = {
+                    message: testMessage,
+                    timestamp: testTimestamp,
+                    engine: "QuickJS",
+                    version: "2025-04-26",
+                    features: ["ES2023", "Modules", "Async/Await", "BigInt"],
+                    test: "Internal test execution successful!",
+                    type: "internal_test",
+                    executionId: Math.random().toString(36).substr(2, 9)
+                };
+                return JSON.stringify(testResult, null, 2);
+            })();
+        """.trimIndent()
+        
+        // For testing, we'll execute the script directly
+        // In a real scenario, you'd host this on a web server
+        callback.onProgress("🧪 Running test script...")
+        
+        try {
+            // The test script is already wrapped in IIFE, so don't use isolatedExecution
+            val result = runJavaScript(testScript, isolatedExecution = false)
+            val executionResult = RemoteExecutionResult(
+                url = "test://internal",
+                fileName = "internal_test.js",
+                timestamp = System.currentTimeMillis(),
+                success = !result.startsWith("Error:") && !result.startsWith("JavaScript Error:") && result != "undefined",
+                result = result,
+                executionTimeMs = 0,
+                contentLength = testScript.length
+            )
+            callback.onSuccess(executionResult)
+        } catch (e: Exception) {
+            callback.onError("test://internal", "Test execution failed: ${e.message}")
+        }
+    }
 }

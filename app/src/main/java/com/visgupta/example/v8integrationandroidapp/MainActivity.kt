@@ -77,7 +77,7 @@ fun V8IntegrationTestScreen(
     modifier: Modifier = Modifier
 ) {
     var selectedTab by remember { mutableStateOf(0) }
-    val tabs = listOf("V8 Engine", "ByteTransfer", "Integration", "Status", "QuickJS")
+    val tabs = listOf("V8 Engine", "ByteTransfer", "Integration", "Status", "QuickJS", "Remote JS")
     
     Column(modifier = modifier.fillMaxSize()) {
         TabRow(selectedTabIndex = selectedTab) {
@@ -96,6 +96,7 @@ fun V8IntegrationTestScreen(
             2 -> IntegrationTestTab(v8Bridge, byteTransferBridge)
             3 -> SystemStatusTab(v8Bridge, byteTransferBridge)
             4 -> QuickJSTestTab(quickJSBridge)
+            5 -> RemoteJSTestTab(quickJSBridge)
         }
     }
 }
@@ -832,6 +833,455 @@ fun QuickJSTestTab(quickJSBridge: QuickJSBridge) {
 
         items(testResults.toList()) { (testName, result) ->
             TestResultCard(testName, result)
+        }
+    }
+}
+
+@Composable
+fun RemoteJSTestTab(quickJSBridge: QuickJSBridge) {
+    var isQuickJSInitialized by remember { mutableStateOf(false) }
+    var remoteUrl by remember { mutableStateOf("https://cdn.jsdelivr.net/npm/lodash@4.17.21/lodash.min.js") }
+    var progressMessage by remember { mutableStateOf("") }
+    var isExecuting by remember { mutableStateOf(false) }
+    var executionResults by remember { mutableStateOf<List<QuickJSBridge.RemoteExecutionResult>>(emptyList()) }
+    var selectedPopularUrl by remember { mutableStateOf("") }
+    
+    // Local server configuration
+    var localServerIp by remember { mutableStateOf("192.168.1.100") }
+    var localServerPort by remember { mutableStateOf("8000") }
+    var showLocalServerConfig by remember { mutableStateOf(false) }
+
+    LazyColumn(
+        modifier = Modifier
+            .fillMaxSize()
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(16.dp)
+    ) {
+        item {
+            Text(
+                text = "Remote JavaScript Execution",
+                style = MaterialTheme.typography.headlineMedium,
+                fontWeight = FontWeight.Bold
+            )
+        }
+
+        item {
+            Card {
+                Column(
+                    modifier = Modifier.padding(16.dp),
+                    verticalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
+                    Text(
+                        text = "QuickJS Engine Status",
+                        style = MaterialTheme.typography.titleMedium,
+                        fontWeight = FontWeight.SemiBold
+                    )
+
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
+                    ) {
+                        Text(
+                            text = if (isQuickJSInitialized) "✅ Ready for Remote Execution" else "❌ Not Initialized",
+                            color = if (isQuickJSInitialized) Color(0xFF4CAF50) else Color(0xFFF44336),
+                            fontWeight = FontWeight.Medium
+                        )
+                    }
+
+                    if (!isQuickJSInitialized) {
+                        Button(
+                            onClick = { isQuickJSInitialized = quickJSBridge.initialize() },
+                            modifier = Modifier.fillMaxWidth()
+                        ) {
+                            Text("Initialize QuickJS")
+                        }
+                    } else {
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(
+                                onClick = {
+                                    progressMessage = "🔄 Resetting JavaScript context..."
+                                    val success = quickJSBridge.resetContext()
+                                    if (success) {
+                                        progressMessage = "✅ Context reset successfully"
+                                    } else {
+                                        progressMessage = "❌ Failed to reset context"
+                                        isQuickJSInitialized = false
+                                    }
+                                },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("Clear Context")
+                            }
+                            
+                            Button(
+                                onClick = {
+                                    quickJSBridge.cleanup()
+                                    isQuickJSInitialized = false
+                                    executionResults = emptyList()
+                                    progressMessage = ""
+                                },
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("Cleanup")
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        if (isQuickJSInitialized) {
+            item {
+                Card {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Text(
+                            text = "Popular JavaScript Libraries",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold
+                        )
+
+                        quickJSBridge.getPopularJavaScriptUrls().forEach { (name, url) ->
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column(modifier = Modifier.weight(1f)) {
+                                    Text(
+                                        text = name,
+                                        style = MaterialTheme.typography.bodyMedium
+                                    )
+                                    if (name == "Test Remote Script") {
+                                        Text(
+                                            text = "Local server: test_remote_script.js",
+                                            style = MaterialTheme.typography.bodySmall,
+                                            color = MaterialTheme.colorScheme.onSurfaceVariant
+                                        )
+                                    }
+                                }
+                                Button(
+                                    onClick = {
+                                        if (name == "Test Remote Script") {
+                                            // Handle local server option
+                                            remoteUrl = quickJSBridge.buildLocalServerUrl(localServerIp, localServerPort)
+                                            selectedPopularUrl = name
+                                            showLocalServerConfig = true
+                                        } else {
+                                            remoteUrl = url
+                                            selectedPopularUrl = name
+                                            showLocalServerConfig = false
+                                        }
+                                    },
+                                    enabled = !isExecuting
+                                ) {
+                                    Text("Use")
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+
+            // Local Server Configuration Card
+            if (showLocalServerConfig) {
+                item {
+                    Card(
+                        colors = CardDefaults.cardColors(
+                            containerColor = MaterialTheme.colorScheme.tertiaryContainer
+                        )
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(16.dp),
+                            verticalArrangement = Arrangement.spacedBy(12.dp)
+                        ) {
+                            Text(
+                                text = "🖥️ Local Server Configuration",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            
+                            Text(
+                                text = "Configure your local server IP and port for test_remote_script.js",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+
+                            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                                OutlinedTextField(
+                                    value = localServerIp,
+                                    onValueChange = { 
+                                        localServerIp = it
+                                        if (selectedPopularUrl == "Test Remote Script") {
+                                            remoteUrl = quickJSBridge.buildLocalServerUrl(localServerIp, localServerPort)
+                                        }
+                                    },
+                                    label = { Text("IP Address") },
+                                    placeholder = { Text("192.168.1.100") },
+                                    modifier = Modifier.weight(2f),
+                                    enabled = !isExecuting,
+                                    singleLine = true
+                                )
+                                
+                                OutlinedTextField(
+                                    value = localServerPort,
+                                    onValueChange = { 
+                                        localServerPort = it
+                                        if (selectedPopularUrl == "Test Remote Script") {
+                                            remoteUrl = quickJSBridge.buildLocalServerUrl(localServerIp, localServerPort)
+                                        }
+                                    },
+                                    label = { Text("Port") },
+                                    placeholder = { Text("8000") },
+                                    modifier = Modifier.weight(1f),
+                                    enabled = !isExecuting,
+                                    singleLine = true
+                                )
+                            }
+
+                            // Show current URL preview
+                            Card(
+                                colors = CardDefaults.cardColors(
+                                    containerColor = MaterialTheme.colorScheme.secondaryContainer
+                                )
+                            ) {
+                                Column(modifier = Modifier.padding(12.dp)) {
+                                    Text(
+                                        text = "Generated URL:",
+                                        style = MaterialTheme.typography.labelMedium,
+                                        fontWeight = FontWeight.Bold
+                                    )
+                                    Text(
+                                        text = quickJSBridge.buildLocalServerUrl(localServerIp, localServerPort),
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = MaterialTheme.colorScheme.primary
+                                    )
+                                }
+                            }
+
+                            // Server instructions
+                            Text(
+                                text = "💡 Make sure your server is running:\n" +
+                                      "• Python: python3 -m http.server ${localServerPort}\n" +
+                                      "• Node.js: node js_server.js\n" +
+                                      "• Auto: ./start_server.sh",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+
+            item {
+                Card {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Text(
+                            text = "Remote JavaScript URL",
+                            style = MaterialTheme.typography.titleMedium,
+                            fontWeight = FontWeight.SemiBold
+                        )
+
+                        if (selectedPopularUrl.isNotEmpty()) {
+                            Text(
+                                text = "Selected: $selectedPopularUrl",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.primary
+                            )
+                        }
+
+                        OutlinedTextField(
+                            value = remoteUrl,
+                            onValueChange = { 
+                                remoteUrl = it
+                                selectedPopularUrl = ""
+                            },
+                            label = { Text("JavaScript URL (HTTP/HTTPS)") },
+                            modifier = Modifier.fillMaxWidth(),
+                            enabled = !isExecuting,
+                            minLines = 2
+                        )
+
+                        if (progressMessage.isNotEmpty()) {
+                            Card(
+                                colors = CardDefaults.cardColors(
+                                    containerColor = MaterialTheme.colorScheme.secondaryContainer
+                                )
+                            ) {
+                                Text(
+                                    text = progressMessage,
+                                    modifier = Modifier.padding(12.dp),
+                                    style = MaterialTheme.typography.bodySmall
+                                )
+                            }
+                        }
+
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            Button(
+                                onClick = {
+                                    isExecuting = true
+                                    progressMessage = ""
+                                    
+                                    quickJSBridge.executeRemoteJavaScript(remoteUrl, object : QuickJSBridge.RemoteExecutionCallback {
+                                        override fun onProgress(message: String) {
+                                            progressMessage = message
+                                        }
+
+                                        override fun onSuccess(result: QuickJSBridge.RemoteExecutionResult) {
+                                            isExecuting = false
+                                            progressMessage = "✅ Execution completed successfully!"
+                                            executionResults = quickJSBridge.getExecutionHistory()
+                                        }
+
+                                        override fun onError(url: String, error: String) {
+                                            isExecuting = false
+                                            progressMessage = "❌ $error"
+                                        }
+                                    })
+                                },
+                                enabled = !isExecuting && remoteUrl.isNotBlank(),
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                if (isExecuting) {
+                                    Text("Executing...")
+                                } else {
+                                    Text("Execute Remote JS")
+                                }
+                            }
+
+                            Button(
+                                onClick = {
+                                    isExecuting = true
+                                    progressMessage = ""
+                                    
+                                    quickJSBridge.testRemoteExecution(object : QuickJSBridge.RemoteExecutionCallback {
+                                        override fun onProgress(message: String) {
+                                            progressMessage = message
+                                        }
+
+                                        override fun onSuccess(result: QuickJSBridge.RemoteExecutionResult) {
+                                            isExecuting = false
+                                            progressMessage = "✅ Test completed successfully!"
+                                            executionResults = quickJSBridge.getExecutionHistory()
+                                        }
+
+                                        override fun onError(url: String, error: String) {
+                                            isExecuting = false
+                                            progressMessage = "❌ $error"
+                                        }
+                                    })
+                                },
+                                enabled = !isExecuting,
+                                modifier = Modifier.weight(1f)
+                            ) {
+                                Text("Run Test")
+                            }
+                        }
+                    }
+                }
+            }
+
+            item {
+                Card {
+                    Column(
+                        modifier = Modifier.padding(16.dp),
+                        verticalArrangement = Arrangement.spacedBy(12.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = "Execution History",
+                                style = MaterialTheme.typography.titleMedium,
+                                fontWeight = FontWeight.SemiBold
+                            )
+                            
+                            if (executionResults.isNotEmpty()) {
+                                Button(
+                                    onClick = {
+                                        quickJSBridge.clearExecutionHistory()
+                                        executionResults = emptyList()
+                                    }
+                                ) {
+                                    Text("Clear")
+                                }
+                            }
+                        }
+
+                        if (executionResults.isEmpty()) {
+                            Text(
+                                text = "No executions yet. Try executing some remote JavaScript!",
+                                style = MaterialTheme.typography.bodyMedium,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant
+                            )
+                        }
+                    }
+                }
+            }
+        }
+
+        items(executionResults) { result ->
+            RemoteExecutionResultCard(result)
+        }
+    }
+}
+
+@Composable
+fun RemoteExecutionResultCard(result: QuickJSBridge.RemoteExecutionResult) {
+    Card(
+        colors = CardDefaults.cardColors(
+            containerColor = if (result.success) 
+                MaterialTheme.colorScheme.primaryContainer 
+            else 
+                MaterialTheme.colorScheme.errorContainer
+        )
+    ) {
+        Column(modifier = Modifier.padding(12.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = result.fileName,
+                    style = MaterialTheme.typography.labelMedium,
+                    fontWeight = FontWeight.Bold,
+                    color = if (result.success) 
+                        MaterialTheme.colorScheme.onPrimaryContainer 
+                    else 
+                        MaterialTheme.colorScheme.onErrorContainer
+                )
+                Text(
+                    text = if (result.success) "✅" else "❌",
+                    style = MaterialTheme.typography.labelMedium
+                )
+            }
+            
+            Text(
+                text = "URL: ${result.url}",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            
+            Text(
+                text = "Size: ${result.contentLength} chars | Time: ${result.executionTimeMs}ms",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant
+            )
+            
+            if (result.result.isNotEmpty()) {
+                Text(
+                    text = "Result: ${result.result.take(200)}${if (result.result.length > 200) "..." else ""}",
+                    style = MaterialTheme.typography.bodySmall,
+                    modifier = Modifier.padding(top = 4.dp)
+                )
+            }
         }
     }
 }
