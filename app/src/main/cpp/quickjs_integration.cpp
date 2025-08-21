@@ -366,6 +366,144 @@ public:
         return resultString;
     }
     
+    /**
+     * Compile JavaScript to bytecode for caching
+     */
+    std::vector<uint8_t> compileScript(const std::string& script) {
+        if (!initialized || !context) {
+            LOGE("QuickJS not initialized for compilation");
+            return {};
+        }
+        
+        LOGI("Compiling JavaScript to bytecode");
+        
+        // Compile to bytecode
+        JSValue compiled = JS_Eval(context, script.c_str(), script.length(), 
+            "<compile>", JS_EVAL_TYPE_GLOBAL | JS_EVAL_FLAG_COMPILE_ONLY);
+        
+        if (JS_IsException(compiled)) {
+            JSValue exception = JS_GetException(context);
+            const char *exceptionStr = JS_ToCString(context, exception);
+            LOGE("Compilation error: %s", exceptionStr ? exceptionStr : "Unknown error");
+            if (exceptionStr) JS_FreeCString(context, exceptionStr);
+            JS_FreeValue(context, exception);
+            JS_FreeValue(context, compiled);
+            return {};
+        }
+        
+        size_t bytecode_size;
+        uint8_t* bytecode = JS_WriteObject(context, &bytecode_size, compiled, JS_WRITE_OBJ_BYTECODE);
+        JS_FreeValue(context, compiled);
+        
+        if (!bytecode) {
+            LOGE("Failed to compile JavaScript to bytecode");
+            return {};
+        }
+        
+        // Copy to vector
+        std::vector<uint8_t> result(bytecode, bytecode + bytecode_size);
+        js_free(context, bytecode);
+        
+        LOGI("Compiled JavaScript to %zu bytes of bytecode", result.size());
+        return result;
+    }
+    
+    /**
+     * Execute bytecode directly
+     */
+    std::string executeBytecode(const std::vector<uint8_t>& bytecode) {
+        if (!initialized || !context) {
+            return "Error: QuickJS not initialized";
+        }
+        
+        if (bytecode.empty()) {
+            return "Error: Empty bytecode";
+        }
+        
+        LOGI("Executing QuickJS bytecode (%zu bytes)", bytecode.size());
+        
+        // Read bytecode object
+        JSValue obj = JS_ReadObject(context, bytecode.data(), bytecode.size(), JS_READ_OBJ_BYTECODE);
+        if (JS_IsException(obj)) {
+            JSValue exception = JS_GetException(context);
+            const char *exceptionStr = JS_ToCString(context, exception);
+            std::string error = "Bytecode Error: ";
+            if (exceptionStr) {
+                error += exceptionStr;
+                JS_FreeCString(context, exceptionStr);
+            } else {
+                error += "Failed to read bytecode";
+            }
+            JS_FreeValue(context, exception);
+            JS_FreeValue(context, obj);
+            LOGE("Bytecode execution error: %s", error.c_str());
+            return error;
+        }
+        
+        // Execute the bytecode
+        JSValue result = JS_EvalFunction(context, obj);
+        
+        if (JS_IsException(result)) {
+            JSValue exception = JS_GetException(context);
+            const char *exceptionStr = JS_ToCString(context, exception);
+            std::string error = "JavaScript Error: ";
+            if (exceptionStr) {
+                error += exceptionStr;
+                JS_FreeCString(context, exceptionStr);
+            } else {
+                error += "Unknown error";
+            }
+            JS_FreeValue(context, exception);
+            JS_FreeValue(context, result);
+            LOGE("JavaScript execution error: %s", error.c_str());
+            return error;
+        }
+        
+        // Convert result to string
+        const char *resultStr = JS_ToCString(context, result);
+        std::string resultString;
+        if (resultStr) {
+            resultString = resultStr;
+            JS_FreeCString(context, resultStr);
+        } else {
+            resultString = "undefined";
+        }
+        
+        JS_FreeValue(context, result);
+        LOGI("Bytecode execution completed successfully");
+        return resultString;
+    }
+    
+    bool resetContext() {
+        LOGI("Resetting QuickJS context");
+        
+        if (!runtime) {
+            LOGE("Cannot reset context: runtime not initialized");
+            return false;
+        }
+        
+        // Free the old context
+        if (context) {
+            JS_FreeContext(context);
+            context = nullptr;
+        }
+        
+        // Create a new context
+        context = JS_NewContext(runtime);
+        if (!context) {
+            LOGE("Failed to create new QuickJS context");
+            initialized = false;
+            return false;
+        }
+        
+        // Add standard library and HTTP polyfills to new context
+        js_std_add_helpers(context, 0, nullptr);
+        addHttpPolyfills(context);
+        
+        LOGI("QuickJS context reset successfully");
+        return true;
+    }
+    
     void cleanup() {
         LOGI("Cleaning up Real QuickJS Engine");
 
@@ -614,6 +752,12 @@ Java_com_visgupta_example_v8integrationandroidapp_QuickJSBridge_nativeHttpReques
     // This function is not directly used but kept for compatibility
     // The actual HTTP requests go through js_http_request -> handleHttpRequest
     return env->NewStringUTF("{}");
+}
+
+// Reset context JNI function
+JNIEXPORT jboolean JNICALL
+Java_com_visgupta_example_v8integrationandroidapp_QuickJSBridge_resetContext(JNIEnv *env, jobject thiz) {
+    return g_quickjsEngine ? g_quickjsEngine->resetContext() : false;
 }
 
 }

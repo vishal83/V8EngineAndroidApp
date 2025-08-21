@@ -6,13 +6,14 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.withContext
+import kotlinx.coroutines.withTimeout
 
 /**
  * Bridge class for QuickJS JavaScript engine integration
  * Provides methods to initialize QuickJS, execute JavaScript code, and manage resources
  * QuickJS is a lightweight, fast JavaScript engine with ES2023 support
  */
-class QuickJSBridge {
+class QuickJSBridge(private val context: android.content.Context) {
 
     companion object {
         private const val TAG = "QuickJSBridge"
@@ -31,15 +32,30 @@ class QuickJSBridge {
     // Network service for remote JavaScript loading
     private val networkService = NetworkService()
     private val httpService = HttpService()
+    private val cacheService = CacheService(context)
     
     // Execution history for remote scripts
     private val executionHistory = mutableListOf<RemoteExecutionResult>()
+    
+    /**
+     * Data class representing the result of remote JavaScript execution
+     */
+    data class RemoteExecutionResult(
+        val url: String,
+        val fileName: String,
+        val timestamp: Long,
+        val success: Boolean,
+        val result: String,
+        val executionTimeMs: Long,
+        val contentLength: Int
+    )
 
     // Native method declarations
     private external fun initializeQuickJS(): Boolean
     private external fun executeScript(script: String): String
     private external fun cleanupQuickJS()
     private external fun isInitialized(): Boolean
+    private external fun resetContext(): Boolean
     
     // HTTP polyfill native methods
     private external fun nativeHttpRequest(url: String, optionsJson: String): String
@@ -118,7 +134,7 @@ class QuickJSBridge {
         try {
             // Wrap in IIFE if isolated execution is requested
             val finalCode = if (isolatedExecution) {
-                // For isolated execution, wrap in IIFE and ensure proper return
+                // For isolated execution, wrap in IIFE
                 "(function() { \n$jsCode\n })();"
             } else {
                 jsCode
@@ -223,32 +239,14 @@ class QuickJSBridge {
     /**
      * Reset QuickJS context to clear variables and avoid conflicts
      */
-    fun resetContext(): Boolean {
+    fun resetQuickJSContext(): Boolean {
         if (!initialized) {
             Log.w(TAG, "Cannot reset context: QuickJS not initialized")
             return false
         }
         
         Log.i(TAG, "Resetting QuickJS context to clear variables")
-        
-        try {
-            // Cleanup and reinitialize to get a fresh context
-            cleanupQuickJS()
-            val success = initializeQuickJS()
-            
-            if (success) {
-                Log.i(TAG, "QuickJS context reset successfully")
-            } else {
-                Log.e(TAG, "Failed to reinitialize QuickJS after context reset")
-                initialized = false
-            }
-            
-            return success
-        } catch (e: Exception) {
-            Log.e(TAG, "Error during context reset", e)
-            initialized = false
-            return false
-        }
+        return resetContext() // Call native method
     }
 
     /**
@@ -261,15 +259,27 @@ class QuickJSBridge {
             
             val options = httpService.parseRequestOptions(optionsJson)
             
-            // Execute the request synchronously for now (JavaScript will handle async)
+            // Execute the request with caching support and timeout
             val response = runBlocking {
-                httpService.executeRequest(url, options)
+                withTimeout(30000) { // 30 second timeout
+                    httpService.executeRequest(url, options, cacheService)
+                }
             }
             
             val responseJson = httpService.responseToJson(response)
             Log.d(TAG, "HTTP request completed: ${response.status}")
             
             responseJson
+        } catch (e: kotlinx.coroutines.TimeoutCancellationException) {
+            Log.e(TAG, "HTTP request timed out: $url", e)
+            val errorResponse = HttpService.HttpResponse(
+                status = 408,
+                statusText = "Request Timeout",
+                headers = emptyMap(),
+                body = "",
+                url = url
+            )
+            httpService.responseToJson(errorResponse)
         } catch (e: Exception) {
             Log.e(TAG, "Error handling HTTP request", e)
             val errorResponse = HttpService.HttpResponse(
@@ -281,6 +291,35 @@ class QuickJSBridge {
             )
             httpService.responseToJson(errorResponse)
         }
+    }
+
+    /**
+     * Get cache statistics
+     */
+    fun getCacheStats(): CacheService.CacheStats {
+        return cacheService.getCacheStats()
+    }
+    
+    /**
+     * Get list of cached URLs
+     */
+    fun getCachedUrls(): List<String> {
+        return cacheService.getCachedUrls()
+    }
+    
+    /**
+     * Clear all cache
+     */
+    suspend fun clearCache() {
+        cacheService.clearCache()
+        Log.i(TAG, "Cache cleared")
+    }
+    
+    /**
+     * Remove specific cache entry
+     */
+    suspend fun removeCacheEntry(url: String): Boolean {
+        return cacheService.removeEntry(url)
     }
 
     /**
@@ -334,19 +373,6 @@ class QuickJSBridge {
     private external fun nativeGetMemoryStats(): String
     
     /**
-     * Data class for remote execution results
-     */
-    data class RemoteExecutionResult(
-        val url: String,
-        val fileName: String,
-        val timestamp: Long,
-        val success: Boolean,
-        val result: String,
-        val executionTimeMs: Long,
-        val contentLength: Int
-    )
-    
-    /**
      * Callback interface for remote JavaScript execution
      */
     interface RemoteExecutionCallback {
@@ -374,10 +400,88 @@ class QuickJSBridge {
         Log.i(TAG, "Starting remote JavaScript execution from: $url")
         callback.onProgress("🌐 Fetching JavaScript from server...")
         
-        // Use coroutine for network operation
+        // Use coroutine for network operation with caching
         CoroutineScope(Dispatchers.Main).launch {
             try {
+                callback.onProgress("🔍 Checking cache for: $url")
                 val startTime = System.currentTimeMillis()
+                
+                // Check if we have cached bytecode
+                val cachedBytecode = withContext(Dispatchers.IO) {
+                    cacheService.getCachedBytecode(url)
+                }
+                
+                if (cachedBytecode != null) {
+                    callback.onProgress("⚡ Executing cached bytecode...")
+                    val executionStartTime = System.currentTimeMillis()
+                    
+                    val result = executeScript(String(cachedBytecode)) // Note: This needs to be updated to support bytecode execution
+                    val executionTime = System.currentTimeMillis() - executionStartTime
+                    
+                    val executionResult = RemoteExecutionResult(
+                        url = url,
+                        fileName = networkService.getFileNameFromUrl(url),
+                        timestamp = System.currentTimeMillis(),
+                        success = !result.startsWith("Error:") && !result.startsWith("JavaScript Error:"),
+                        result = result,
+                        executionTimeMs = executionTime,
+                        contentLength = cachedBytecode.size
+                    )
+                    
+                    executionHistory.add(0, executionResult)
+                    if (executionHistory.size > 50) {
+                        executionHistory.removeAt(executionHistory.size - 1)
+                    }
+                    
+                    Log.i(TAG, "✅ Executed cached bytecode for: $url")
+                    callback.onSuccess(executionResult)
+                    return@launch
+                }
+                
+                // Check for cached source code
+                val cachedEntry = withContext(Dispatchers.IO) {
+                    cacheService.getCachedEntry(url)
+                }
+                
+                if (cachedEntry != null) {
+                    Log.d(TAG, "Found cached entry - etag: ${cachedEntry.etag}, lastModified: ${cachedEntry.lastModified}, needsRevalidation: ${cachedEntry.needsRevalidation()}")
+                    if (!cachedEntry.needsRevalidation()) {
+                        callback.onProgress("⚡ Executing cached JavaScript...")
+                        val executionStartTime = System.currentTimeMillis()
+                        
+                        // Reset context to prevent variable redeclaration issues
+                        if (!resetQuickJSContext()) {
+                            Log.w(TAG, "Failed to reset context, continuing with isolated execution")
+                        }
+                        
+                        val sanitizedCode = networkService.sanitizeJavaScript(cachedEntry.sourceCode)
+                        // Use isolated execution for cached scripts to prevent variable conflicts
+                        val result = runJavaScript(sanitizedCode, isolatedExecution = true)
+                        val executionTime = System.currentTimeMillis() - executionStartTime
+                        
+                        val executionResult = RemoteExecutionResult(
+                            url = url,
+                            fileName = networkService.getFileNameFromUrl(url),
+                            timestamp = System.currentTimeMillis(),
+                            success = !result.startsWith("Error:") && !result.startsWith("JavaScript Error:"),
+                            result = result,
+                            executionTimeMs = executionTime,
+                            contentLength = cachedEntry.sourceCode.length
+                        )
+                        
+                        executionHistory.add(0, executionResult)
+                        if (executionHistory.size > 50) {
+                            executionHistory.removeAt(executionHistory.size - 1)
+                        }
+                        
+                        Log.i(TAG, "✅ Executed cached JavaScript for: $url")
+                        callback.onSuccess(executionResult)
+                        return@launch
+                    }
+                }
+                
+                // Fetch from network with caching
+                callback.onProgress("📡 Fetching JavaScript from server...")
                 
                 // Fetch JavaScript from remote server
                 val networkResult = withContext(Dispatchers.IO) {
@@ -386,7 +490,16 @@ class QuickJSBridge {
                 
                 when (networkResult) {
                     is NetworkService.NetworkResult.Success -> {
-                        callback.onProgress("✅ JavaScript fetched, executing...")
+                        callback.onProgress("✅ JavaScript fetched, caching and executing...")
+                        
+                        // Cache the downloaded content
+                        withContext(Dispatchers.IO) {
+                            cacheService.cacheEntry(
+                                url = url,
+                                sourceCode = networkResult.content,
+                                contentType = networkResult.contentType
+                            )
+                        }
                         
                         // Validate content
                         if (!networkService.isJavaScriptContent(networkResult.contentType, url)) {
@@ -397,7 +510,8 @@ class QuickJSBridge {
                         // Sanitize and execute
                         val sanitizedCode = networkService.sanitizeJavaScript(networkResult.content)
                         val executionStart = System.currentTimeMillis()
-                        val result = executeScript(sanitizedCode)
+                        // Use isolated execution for downloaded scripts to prevent variable conflicts
+                        val result = runJavaScript(sanitizedCode, isolatedExecution = true)
                         val executionTime = System.currentTimeMillis() - executionStart
                         
                         // Create result object
@@ -461,6 +575,8 @@ class QuickJSBridge {
         return listOf(
             "Test Remote Script" to "LOCAL_SERVER/test_remote_script.js", // Placeholder for local server
             "Test HTTP Polyfills" to "LOCAL_SERVER/test_fetch_polyfill.js", // Test fetch() and XMLHttpRequest
+            "Test Cache System (Fast)" to "LOCAL_SERVER/test_cache_system_fast.js", // Fast cache test
+            "Test Cache System" to "LOCAL_SERVER/test_cache_system.js", // Full cache test with HTTP
             "Lodash Utility" to "https://cdn.jsdelivr.net/npm/lodash@4.17.21/lodash.min.js",
             "Moment.js Date" to "https://cdn.jsdelivr.net/npm/moment@2.29.4/moment.min.js",
             "Math.js Library" to "https://cdn.jsdelivr.net/npm/mathjs@11.11.0/lib/browser/math.min.js",

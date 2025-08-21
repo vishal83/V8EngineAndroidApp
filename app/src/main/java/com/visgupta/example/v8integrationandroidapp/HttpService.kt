@@ -50,12 +50,166 @@ class HttpService {
     )
 
     /**
-     * Execute HTTP request asynchronously
+     * Execute HTTP request with caching support
      * This is the main method called from native code
      */
     suspend fun executeRequest(
         url: String,
-        options: HttpRequestOptions
+        options: HttpRequestOptions,
+        cacheService: CacheService? = null
+    ): HttpResponse = withContext(Dispatchers.IO) {
+        
+        // Check cache first for GET requests
+        if (options.method == "GET" && cacheService != null) {
+            val cachedEntry = cacheService.getCachedEntry(url)
+            if (cachedEntry != null && !cachedEntry.needsRevalidation()) {
+                Log.d(TAG, "Returning cached response for: $url")
+                return@withContext HttpResponse(
+                    status = 200,
+                    statusText = "OK",
+                    headers = mapOf(
+                        "content-type" to (cachedEntry.contentType ?: "text/javascript"),
+                        "x-cache" to "HIT"
+                    ),
+                    body = cachedEntry.sourceCode,
+                    url = url
+                )
+            }
+            
+            // Check if we should do conditional request
+            val (shouldRevalidate, oldEntry) = cacheService.shouldRevalidate(url)
+            if (shouldRevalidate && oldEntry != null) {
+                Log.d(TAG, "Making conditional request for: $url")
+                return@withContext executeConditionalRequest(url, options, oldEntry, cacheService)
+            }
+        }
+        
+        return@withContext executeActualRequest(url, options, cacheService)
+    }
+    
+    /**
+     * Execute conditional HTTP request (with If-None-Match/If-Modified-Since)
+     */
+    private suspend fun executeConditionalRequest(
+        url: String,
+        options: HttpRequestOptions,
+        cachedEntry: CacheService.CacheEntry,
+        cacheService: CacheService
+    ): HttpResponse = withContext(Dispatchers.IO) {
+        try {
+            val requestBuilder = Request.Builder()
+                .url(url)
+                .method("GET", null)
+
+            // Add conditional headers
+            cachedEntry.etag?.let { etag ->
+                requestBuilder.addHeader("If-None-Match", etag)
+                Log.d(TAG, "Added If-None-Match: $etag")
+            }
+            
+            cachedEntry.lastModified?.let { lastModified ->
+                requestBuilder.addHeader("If-Modified-Since", lastModified)
+                Log.d(TAG, "Added If-Modified-Since: $lastModified")
+            }
+
+            // Add other headers
+            options.headers.forEach { (key, value) ->
+                requestBuilder.addHeader(key, value)
+            }
+
+            val request = requestBuilder.build()
+            val response = client.newCall(request).execute()
+
+            when (response.code) {
+                304 -> {
+                    // Not Modified - return cached content
+                    Log.d(TAG, "304 Not Modified - using cached content for: $url")
+                    response.close()
+                    return@withContext HttpResponse(
+                        status = 200,
+                        statusText = "OK",
+                        headers = mapOf(
+                            "content-type" to (cachedEntry.contentType ?: "text/javascript"),
+                            "x-cache" to "REVALIDATED"
+                        ),
+                        body = cachedEntry.sourceCode,
+                        url = url
+                    )
+                }
+                200 -> {
+                    // Modified - update cache with new content
+                    val responseHeaders = mutableMapOf<String, String>()
+                    response.headers.forEach { pair ->
+                        responseHeaders[pair.first] = pair.second
+                    }
+
+                    val responseBody = response.body?.string() ?: ""
+                    
+                    // Cache the updated content
+                    if (responseBody.isNotEmpty()) {
+                        cacheService.cacheEntry(
+                            url = url,
+                            sourceCode = responseBody,
+                            etag = response.header("ETag"),
+                            lastModified = response.header("Last-Modified"),
+                            contentType = response.header("Content-Type")
+                        )
+                    }
+                    
+                    Log.d(TAG, "200 OK - updated cached content for: $url")
+                    
+                    return@withContext HttpResponse(
+                        status = response.code,
+                        statusText = response.message,
+                        headers = responseHeaders.apply { put("x-cache", "UPDATED") },
+                        body = responseBody,
+                        url = response.request.url.toString(),
+                        redirected = response.priorResponse != null
+                    )
+                }
+                else -> {
+                    // Other status codes - handle normally
+                    val responseHeaders = mutableMapOf<String, String>()
+                    response.headers.forEach { pair ->
+                        responseHeaders[pair.first] = pair.second
+                    }
+
+                    val responseBody = response.body?.string() ?: ""
+                    
+                    return@withContext HttpResponse(
+                        status = response.code,
+                        statusText = response.message,
+                        headers = responseHeaders,
+                        body = responseBody,
+                        url = response.request.url.toString(),
+                        redirected = response.priorResponse != null
+                    )
+                }
+            }
+            
+        } catch (e: Exception) {
+            Log.w(TAG, "Conditional request failed, falling back to cached content: $url", e)
+            // Return cached content on network error
+            return@withContext HttpResponse(
+                status = 200,
+                statusText = "OK",
+                headers = mapOf(
+                    "content-type" to (cachedEntry.contentType ?: "text/javascript"),
+                    "x-cache" to "STALE"
+                ),
+                body = cachedEntry.sourceCode,
+                url = url
+            )
+        }
+    }
+    
+    /**
+     * Execute actual HTTP request (non-conditional)
+     */
+    private suspend fun executeActualRequest(
+        url: String,
+        options: HttpRequestOptions,
+        cacheService: CacheService?
     ): HttpResponse = withContext(Dispatchers.IO) {
         Log.d(TAG, "Executing HTTP request: ${options.method} $url")
         
@@ -83,6 +237,18 @@ class HttpService {
             }
 
             val responseBody = response.body?.string() ?: ""
+            
+            // Cache GET requests if caching is enabled
+            if (options.method == "GET" && cacheService != null && responseBody.isNotEmpty() && response.code == 200) {
+                cacheService.cacheEntry(
+                    url = url,
+                    sourceCode = responseBody,
+                    etag = response.header("ETag"),
+                    lastModified = response.header("Last-Modified"),
+                    contentType = response.header("Content-Type")
+                )
+                responseHeaders["x-cache"] = "MISS"
+            }
             
             Log.d(TAG, "HTTP response: ${response.code} ${response.message}")
             

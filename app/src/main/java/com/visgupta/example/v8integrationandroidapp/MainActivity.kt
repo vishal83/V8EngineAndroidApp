@@ -1,5 +1,6 @@
 package com.visgupta.example.v8integrationandroidapp
 
+import android.content.Context
 import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
@@ -16,6 +17,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.tooling.preview.Preview
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.dp
 import com.visgupta.example.v8integrationandroidapp.ui.theme.MyApplicationTheme
 
@@ -38,7 +40,7 @@ class MainActivity : ComponentActivity() {
         
         v8Bridge = V8Bridge()
         byteTransferBridge = ByteTransferBridge()
-        quickJSBridge = QuickJSBridge()
+        quickJSBridge = QuickJSBridge(this)
         
         setContent {
             MyApplicationTheme {
@@ -900,7 +902,7 @@ fun RemoteJSTestTab(quickJSBridge: QuickJSBridge) {
                             Button(
                                 onClick = {
                                     progressMessage = "🔄 Resetting JavaScript context..."
-                                    val success = quickJSBridge.resetContext()
+                                    val success = quickJSBridge.resetQuickJSContext()
                                     if (success) {
                                         progressMessage = "✅ Context reset successfully"
                                     } else {
@@ -974,6 +976,16 @@ fun RemoteJSTestTab(quickJSBridge: QuickJSBridge) {
                                             remoteUrl = quickJSBridge.buildLocalServerUrl(localServerIp, localServerPort, "test_fetch_polyfill.js")
                                             selectedPopularUrl = name
                                             showLocalServerConfig = true
+                                        } else if (name == "Test Cache System (Fast)") {
+                                            // Handle fast cache system test
+                                            remoteUrl = quickJSBridge.buildLocalServerUrl(localServerIp, localServerPort, "test_cache_system_fast.js")
+                                            selectedPopularUrl = name
+                                            showLocalServerConfig = true
+                                        } else if (name == "Test Cache System") {
+                                            // Handle cache system test
+                                            remoteUrl = quickJSBridge.buildLocalServerUrl(localServerIp, localServerPort, "test_cache_system.js")
+                                            selectedPopularUrl = name
+                                            showLocalServerConfig = true
                                         } else {
                                             remoteUrl = url
                                             selectedPopularUrl = name
@@ -1023,6 +1035,10 @@ fun RemoteJSTestTab(quickJSBridge: QuickJSBridge) {
                                             remoteUrl = quickJSBridge.buildLocalServerUrl(localServerIp, localServerPort)
                                         } else if (selectedPopularUrl == "Test HTTP Polyfills") {
                                             remoteUrl = quickJSBridge.buildLocalServerUrl(localServerIp, localServerPort, "test_fetch_polyfill.js")
+                                        } else if (selectedPopularUrl == "Test Cache System (Fast)") {
+                                            remoteUrl = quickJSBridge.buildLocalServerUrl(localServerIp, localServerPort, "test_cache_system_fast.js")
+                                        } else if (selectedPopularUrl == "Test Cache System") {
+                                            remoteUrl = quickJSBridge.buildLocalServerUrl(localServerIp, localServerPort, "test_cache_system.js")
                                         }
                                     },
                                     label = { Text("IP Address") },
@@ -1040,6 +1056,10 @@ fun RemoteJSTestTab(quickJSBridge: QuickJSBridge) {
                                             remoteUrl = quickJSBridge.buildLocalServerUrl(localServerIp, localServerPort)
                                         } else if (selectedPopularUrl == "Test HTTP Polyfills") {
                                             remoteUrl = quickJSBridge.buildLocalServerUrl(localServerIp, localServerPort, "test_fetch_polyfill.js")
+                                        } else if (selectedPopularUrl == "Test Cache System (Fast)") {
+                                            remoteUrl = quickJSBridge.buildLocalServerUrl(localServerIp, localServerPort, "test_cache_system_fast.js")
+                                        } else if (selectedPopularUrl == "Test Cache System") {
+                                            remoteUrl = quickJSBridge.buildLocalServerUrl(localServerIp, localServerPort, "test_cache_system.js")
                                         }
                                     },
                                     label = { Text("Port") },
@@ -1299,9 +1319,10 @@ fun RemoteExecutionResultCard(result: QuickJSBridge.RemoteExecutionResult) {
 @Composable
 fun V8IntegrationTestScreenPreview() {
     MyApplicationTheme {
+        val context = LocalContext.current
         val mockV8Bridge = V8Bridge()
         val mockByteTransferBridge = ByteTransferBridge()
-        val mockQuickJSBridge = QuickJSBridge()
+        val mockQuickJSBridge = QuickJSBridge(context)
         V8IntegrationTestScreen(
             v8Bridge = mockV8Bridge,
             byteTransferBridge = mockByteTransferBridge,
